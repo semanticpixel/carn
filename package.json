@@ -1,0 +1,40 @@
+{
+  "name": "carn",
+  "version": "0.0.0",
+  "description": "Live, typed, repo-scoped context for AI agents and the humans they work with.",
+  "type": "module",
+  "packageManager": "pnpm@10.30.3",
+  "bin": {
+    "carn": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "echo \"no linter configured yet\""
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "MIT",
+  "author": "Luis Torres",
+  "homepage": "https://github.com/semanticpixel/carn",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/semanticpixel/carn.git"
+  },
+  "bugs": {
+    "url": "https://github.com/semanticpixel/carn/issues"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
