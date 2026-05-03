@@ -24,7 +24,7 @@ Mark an item done by striking through the title in the index below
 Three entry types: `forbid-pattern`, `prefer-pattern`, `coordinate`.
 Orphan branch storage. CLI + MCP + Claude Code hook.
 
-- 1. Project bootstrap (TS, pnpm, vitest, AGENTS.md, CI)
+- ~~1. Project bootstrap (TS, pnpm, vitest, AGENTS.md, CI)~~ DONE — see [PLAN-DONE.md](./PLAN-DONE.md)
 - 2. Storage layer (orphan branch + file-per-entry + index.jsonl)
 - 3. Entry schema + Zod validation (the three v1 types)
 - 4. Path matching (glob support for path-scoped queries)
@@ -59,26 +59,9 @@ to numbered items.
 
 ## v1 items — detail
 
-### 1. Project bootstrap
+### ~~1. Project bootstrap~~ DONE
 
-**What:** Set up the TypeScript project with pnpm + vitest + tsconfig +
-package.json + AGENTS.md + LICENSE + CI workflow.
-
-**Implementation:**
-- TypeScript with strict mode, ES2022 target, NodeNext module resolution
-- pnpm (pinned via `packageManager` field) + Node 24 (`.nvmrc`)
-- vitest for tests (co-located `*.test.ts`)
-- Single `bin` entry in package.json: `carn` → `./dist/cli.js`
-- AGENTS.md (symlink CLAUDE.md → AGENTS.md) with project conventions
-- GitHub Actions CI: typecheck + test on push and PR
-- `tsup` or `unbuild` for bundling
-
-**Acceptance:**
-- `pnpm install && pnpm build && pnpm test` exits 0
-- `pnpm link` makes `carn --help` work
-- CI runs green on a no-op PR
-
-**Out of scope:** Publishing to npm (item 11), release automation.
+Moved to [PLAN-DONE.md](./PLAN-DONE.md).
 
 ---
 
