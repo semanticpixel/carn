@@ -43,7 +43,8 @@ describe('EntrySchema — round-trip per type', () => {
       constraint: input.constraint,
       description: input.description,
     });
-    expect(parsed.paths).toEqual([]);
+    // Canonical "applies everywhere" — `[]` and absent both normalise to `['*']`.
+    expect(parsed.paths).toEqual(['*']);
     expect(parsed.ttl).toBeNull();
     expect(parsed.closed_at).toBeNull();
     expect(parsed.metadata).toEqual({});
@@ -292,16 +293,28 @@ describe('serializeEntry / parseEntry round-trip', () => {
   });
 });
 
-describe('EntrySchema — defaults', () => {
-  it('fills in paths=[], ttl=null, closed_at=null, metadata={} when omitted', () => {
+describe('EntrySchema — defaults + canonical paths', () => {
+  it('fills in defaults — paths=["*"], ttl=null, closed_at=null, metadata={}', () => {
     const parsed = parseEntry({
       type: 'forbid-pattern',
       ...baseFields(),
       constraint: 'x',
     });
-    expect(parsed.paths).toEqual([]);
+    expect(parsed.paths).toEqual(['*']);
     expect(parsed.ttl).toBeNull();
     expect(parsed.closed_at).toBeNull();
     expect(parsed.metadata).toEqual({});
+  });
+
+  it('normalises an explicit empty `paths: []` to the canonical `["*"]`', () => {
+    // Avoids the dual representation problem — downstream code never has to
+    // test for both `paths: []` and `paths: ['*']` to ask "applies everywhere?"
+    const parsed = parseEntry({
+      type: 'forbid-pattern',
+      ...baseFields(),
+      paths: [],
+      constraint: 'x',
+    });
+    expect(parsed.paths).toEqual(['*']);
   });
 });

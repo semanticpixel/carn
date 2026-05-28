@@ -43,7 +43,14 @@ const CarnId = z.string().refine((v) => isValidId(v), {
 const baseShape = {
   id: CarnId,
   description: z.string().min(1, 'description is required').max(DESCRIPTION_MAX_LEN),
-  paths: z.array(z.string().min(1)).default([]),
+  // Canonical "applies everywhere" is `['*']` — the REPO_WIDE_SENTINEL.
+  // An empty input array normalises to `['*']` on parse so downstream code
+  // (CLI display, MCP output, ST-9 doctor, ST-4's path-match) sees exactly
+  // one representation. Don't grow code that has to test for both shapes.
+  paths: z
+    .array(z.string().min(1))
+    .default(['*'])
+    .transform((p) => (p.length === 0 ? ['*'] : p)),
   author: z.string().min(1, 'author is required'),
   created_at: IsoDateTime,
   updated_at: IsoDateTime,

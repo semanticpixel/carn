@@ -62,16 +62,42 @@ describe('pathsOverlap', () => {
   });
 
   it('empty entryPaths is treated as repo-wide (matches any non-empty query)', () => {
+    // Defensive: ST-3 normalises `[]` → `['*']` on the schema side, but the
+    // helper still has to handle hand-built arrays from CLI/MCP layers.
     expect(pathsOverlap([], ['src/auth/login.ts'])).toBe(true);
   });
 
-  it('empty queryPaths matches anything — keeps API symmetric with filterByPaths', () => {
-    expect(pathsOverlap(['src/auth/login.ts'], [])).toBe(true);
+  it('empty queryPaths returns false — pathsOverlap is a pure predicate, not the filter shortcut', () => {
+    // The "no filter" semantic lives on `filterByPaths`; here, asking about
+    // overlap with nothing → no overlap.
+    expect(pathsOverlap(['src/auth/login.ts'], [])).toBe(false);
   });
 
   it('hidden / dotfile paths match (dot: true on picomatch)', () => {
     expect(pathsOverlap(['**'], ['.env'])).toBe(true);
     expect(pathsOverlap(['.github/**'], ['.github/workflows/ci.yml'])).toBe(true);
+  });
+
+  it('strips a leading `./` so `./src/foo.ts` is the same scope as `src/foo.ts`', () => {
+    expect(pathsOverlap(['src/**/*.ts'], ['./src/auth/login.ts'])).toBe(true);
+    expect(pathsOverlap(['./src/auth/**'], ['src/auth/login.ts'])).toBe(true);
+  });
+
+  it('trims a trailing slash so `src/auth/` and `src/auth` describe the same scope', () => {
+    expect(pathsOverlap(['src/auth/**'], ['src/auth/'])).toBe(true);
+    expect(pathsOverlap(['src/auth/'], ['src/auth/login.ts'])).toBe(false);
+    // A trailing-slash glob normalises to the bare directory; matching it
+    // against itself (post-normalisation) is an equality match.
+    expect(pathsOverlap(['src/auth/'], ['src/auth'])).toBe(true);
+  });
+
+  it('absolute paths fail to match relative globs (left as-is; CLI rejects at argv)', () => {
+    expect(pathsOverlap(['src/**/*.ts'], ['/Users/dev/repo/src/auth/login.ts'])).toBe(false);
+    expect(pathsOverlap(['/abs/path.ts'], ['/abs/path.ts'])).toBe(true);
+  });
+
+  it('repo-wide sentinel `*` survives normalization (never stripped/trimmed)', () => {
+    expect(pathsOverlap(['*'], ['./src/auth/login.ts'])).toBe(true);
   });
 });
 

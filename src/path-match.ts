@@ -17,10 +17,23 @@ const PICOMATCH_OPTS: picomatch.PicomatchOptions = {
 };
 
 function normalize(p: string): string {
+  if (isSentinel(p)) return p;
   // The product is repo-scoped, where all paths are git-tracked → always
   // posix slashes on disk. But CLI users on Windows will pass `\` from cmd.
   // Convert before matching so picomatch's posix-only globs apply uniformly.
-  return p.replace(/\\/g, '/');
+  let n = p.replace(/\\/g, '/');
+  // Strip a leading `./` — `./src/foo.ts` is the same scope as `src/foo.ts`
+  // and shells/CLIs frequently produce the former from tab completion or
+  // explicit `./` patterns.
+  if (n.startsWith('./')) n = n.slice(2);
+  // Trim a trailing slash (but never the bare root `/`) — `src/auth/` and
+  // `src/auth` describe the same directory scope.
+  if (n.length > 1 && n.endsWith('/')) n = n.slice(0, -1);
+  // Absolute paths are intentionally left as-is: picomatch will fail to
+  // match them against relative globs, which is the correct behavior for a
+  // repo-scoped tool. ST-5's CLI is expected to reject them at the argv
+  // boundary before they reach here.
+  return n;
 }
 
 function isSentinel(p: string): boolean {
@@ -52,13 +65,16 @@ function singleOverlap(a: string, b: string): boolean {
  * or the `'*'` sentinel.
  */
 export function pathsOverlap(entryPaths: string[], queryPaths: string[]): boolean {
-  // Empty entryPaths means an unscoped entry → applies everywhere → always
-  // overlaps any non-empty query.
+  // Defensive: an empty entryPaths array shouldn't appear in validated Entry
+  // data — ST-3's schema normalises `[]` → `['*']` on parse. But path-match
+  // may be called with hand-built arrays from CLI/MCP layers; treat the
+  // empty case as repo-wide so callers don't have to remember the rule.
   if (entryPaths.length === 0) return true;
-  // An empty queryPaths means "no filter at this layer" — by convention we
-  // treat that as overlap too, so `pathsOverlap(entry, [])` is consistent
-  // with `filterByPaths(entries, [])` returning all entries.
-  if (queryPaths.length === 0) return true;
+  // An empty queryPaths means "nothing to ask about" → no overlap. The
+  // "no filter" semantic lives on `filterByPaths`, not here. Callers asking
+  // about overlap with an empty query should get the predicate's answer:
+  // false. (See filterByPaths below for the no-filter shortcut.)
+  if (queryPaths.length === 0) return false;
   for (const e of entryPaths) {
     for (const q of queryPaths) {
       if (singleOverlap(e, q)) return true;
