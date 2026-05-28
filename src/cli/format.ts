@@ -1,4 +1,5 @@
 import pc from 'picocolors';
+import { isExpired, ttlRemaining } from '../ttl.js';
 import type { Entry } from '../types.js';
 
 /**
@@ -135,17 +136,43 @@ export function shortDescription(s: string, max = 60): string {
   return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
 }
 
-export function formatEntryRow(entry: Entry): string[] {
+export interface FormatEntryRowOptions {
+  /** Painter to colour the TTL/EXPIRED badge. Defaults to a no-op painter. */
+  paint?: ReturnType<typeof painter>;
+  /** Override the clock — used by tests. */
+  now?: Date;
+}
+
+export function formatEntryRow(
+  entry: Entry,
+  opts: FormatEntryRowOptions = {},
+): string[] {
+  const now = opts.now ?? new Date();
+  const p = opts.paint;
   return [
     entry.id,
     entry.type,
     shortDescription(entry.description),
-    entry.ttl ?? '-',
+    formatTtlCell(entry, now, p),
     entry.author,
     // AGE = time since last update (not creation). Matches ST-9 doctor's
     // `updated_at`-based stale check; an entry "ages" by sitting untouched.
-    humanAge(entry.updated_at),
+    humanAge(entry.updated_at, now),
   ];
+}
+
+function formatTtlCell(
+  entry: Entry,
+  now: Date,
+  p: ReturnType<typeof painter> | undefined,
+): string {
+  if (!entry.ttl) return '-';
+  if (entry.closed_at !== null) return entry.ttl;
+  if (isExpired(entry, now)) {
+    const badge = 'EXPIRED';
+    return p ? p.red(badge) : badge;
+  }
+  return ttlRemaining(entry, now) ?? entry.ttl;
 }
 
 export const TABLE_HEADER = ['ID', 'TYPE', 'DESCRIPTION', 'TTL', 'AUTHOR', 'AGE'] as const;
