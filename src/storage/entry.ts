@@ -4,7 +4,12 @@ import { dirname, join } from 'node:path';
 import { ensureBranch } from './branch.js';
 import { generateId, isValidId } from './id.js';
 import { appendIndexRecord } from './index-log.js';
-import { ConcurrentWriteError, EntryNotFoundError, IdCollisionError } from './errors.js';
+import {
+  ConcurrentWriteError,
+  EntryNotFoundError,
+  GitCommandError,
+  IdCollisionError,
+} from './errors.js';
 import {
   CARN_BRANCH,
   CARN_REF,
@@ -84,6 +89,11 @@ async function findEntryFile(
   return null;
 }
 
+async function workingTreeIsClean(worktree: string): Promise<boolean> {
+  const res = await gitExec(worktree, ['status', '--porcelain']);
+  return res.stdout.trim().length === 0;
+}
+
 async function stageAndCommit(
   worktree: string,
   env: NodeJS.ProcessEnv,
@@ -91,6 +101,27 @@ async function stageAndCommit(
 ): Promise<void> {
   await gitExec(worktree, ['add', '-A']);
   await gitExec(worktree, ['commit', '-m', message], { env });
+}
+
+const warnedNoOrigin = new Set<string>();
+function warnOnceNoOrigin(repoRoot: string): void {
+  if (warnedNoOrigin.has(repoRoot)) return;
+  warnedNoOrigin.add(repoRoot);
+  // Surfacing this once per process is what the spec asks for: "no origin → push
+  // is a warning no-op, not an error." Silent no-ops bite later when the user
+  // adds a remote and discovers carn history nobody else can see.
+  process.stderr.write(
+    `carn: no 'origin' remote configured for ${repoRoot}; entries are local-only until you add one.\n`,
+  );
+}
+
+/** Test-only: clear the warn memo so a test can re-trigger the warning. */
+export function _resetNoOriginWarnMemoForTests(): void {
+  warnedNoOrigin.clear();
+}
+
+function isConflictPushFailure(stderr: string): boolean {
+  return /non-fast-forward|rejected|\bfetch first\b/i.test(stderr);
 }
 
 async function pushAndUpdateLocalRef(
@@ -107,12 +138,23 @@ async function pushAndUpdateLocalRef(
       { allowFailure: true },
     );
     if (push.code !== 0) {
-      // Surface non-fast-forwards as ConcurrentWriteError so the caller can
-      // decide whether to rebase+retry. Other push failures (network, auth)
-      // bubble up under the same flag — the message preserves stderr so the
-      // caller / user can disambiguate.
-      throw new ConcurrentWriteError(push.stderr.trim() || push.stdout.trim());
+      const stderr = push.stderr || push.stdout;
+      // ConcurrentWriteError is scoped specifically to non-fast-forwards — the
+      // only push failure whose remedy is fetch+rebase+retry. Everything else
+      // (auth, network, refspec malformed) bubbles up as the underlying
+      // GitCommandError so the caller's retry path doesn't do wasted work and
+      // the error message reflects the actual cause.
+      if (isConflictPushFailure(stderr)) {
+        throw new ConcurrentWriteError(stderr.trim());
+      }
+      throw new GitCommandError(
+        ['push', 'origin', `${head}:${CARN_REF}`],
+        push.code,
+        stderr,
+      );
     }
+  } else {
+    warnOnceNoOrigin(repoRoot);
   }
 
   await gitExec(repoRoot, ['update-ref', CARN_REF, head], { allowFailure: true });
@@ -141,6 +183,10 @@ async function commitAndPushWithRetry(
   retryOnConflict = true,
 ): Promise<void> {
   await applyChanges();
+  // applyChanges may decide there is nothing to write (e.g. closeEntry on an
+  // entry that was already closed). Skip commit+push in that case so callers
+  // don't see a `nothing to commit` GitCommandError on idempotent no-ops.
+  if (await workingTreeIsClean(ctx.lease.path)) return;
   await stageAndCommit(ctx.lease.path, ctx.env, message);
   try {
     await pushAndUpdateLocalRef(repoRoot, ctx.lease.path);
@@ -150,6 +196,7 @@ async function commitAndPushWithRetry(
     // Rebase: reset the worktree to the new tip, re-apply changes, commit, push.
     await fetchAndResetWorktree(repoRoot, ctx.lease.path);
     await applyChanges();
+    if (await workingTreeIsClean(ctx.lease.path)) return;
     await stageAndCommit(ctx.lease.path, ctx.env, message);
     await pushAndUpdateLocalRef(repoRoot, ctx.lease.path);
   }

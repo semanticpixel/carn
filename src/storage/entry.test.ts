@@ -102,6 +102,30 @@ describe('entry — single-repo flow', () => {
     expect(closedList.map((e) => e.id)).toEqual([entry.id]);
   });
 
+  it('closeEntry called twice on the same id is idempotent (no `nothing to commit` error)', async () => {
+    const sbx = await makeBareRepo();
+    cleanups.push(sbx.cleanup);
+    const entry = await addEntry(sbx.root, { note: 'reclose' });
+
+    const first = await closeEntry(sbx.root, entry.id);
+    expect(first.id).toBe(entry.id);
+
+    // Second close should be a graceful no-op — the underlying file is already
+    // in closed/, no new commit is produced, and no GitCommandError is raised.
+    const second = await closeEntry(sbx.root, entry.id);
+    expect(second.id).toBe(entry.id);
+
+    // Confirm there is exactly one `close` record in the index log.
+    const lease = await acquireWorktree(sbx.root);
+    try {
+      const log = await readIndexLog(lease.path);
+      const closeRecs = log.filter((r) => r.id === entry.id && r.op === 'close');
+      expect(closeRecs).toHaveLength(1);
+    } finally {
+      await lease.release();
+    }
+  });
+
   it('updateEntry on an unknown id throws EntryNotFoundError', async () => {
     const sbx = await makeBareRepo();
     cleanups.push(sbx.cleanup);
