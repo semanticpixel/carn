@@ -34,6 +34,17 @@ export interface AddEntryOptions {
   retryOnConflict?: boolean;
 }
 
+export interface CloseEntryOptions extends AddEntryOptions {
+  /**
+   * Optional metadata to merge into the entry before close. Applied
+   * atomically in the same commit as the in-flight → closed move, so
+   * `carn close --merged-sha <sha>` produces one carn-branch commit and
+   * never leaves the entry in the half-state where `metadata.merged_sha`
+   * is set but the entry is still in-flight.
+   */
+  metadataPatch?: Record<string, unknown>;
+}
+
 export interface ListEntriesOptions {
   /** Default: `'in-flight'`. */
   status?: 'in-flight' | 'closed' | 'all';
@@ -353,12 +364,13 @@ export async function updateEntry(
 export async function closeEntry(
   repoRoot: string,
   id: string,
-  opts: AddEntryOptions = {},
+  opts: CloseEntryOptions = {},
 ): Promise<Entry> {
   if (!isValidId(id)) throw new EntryNotFoundError(id);
   await purgeStaleCarnWorktrees(repoRoot);
   const identity = opts.identity ?? DEFAULT_IDENTITY;
   const retryOnConflict = opts.retryOnConflict !== false;
+  const metadataPatch = opts.metadataPatch;
 
   return await withWorktree(repoRoot, identity, async (ctx) => {
     let closed: Entry | null = null;
@@ -380,10 +392,14 @@ export async function closeEntry(
         await gitExec(ctx.lease.path, ['mv', fromRel, toRel]);
         // Stamp closed_at + bump updated_at and rewrite the file with the
         // validated shape — `parseEntry(closed/<id>.json)` always shows the
-        // moment of close, and ST-9 doctor's stale check still sees the bump.
+        // moment of close. metadataPatch (if any) merges into metadata in the
+        // same commit, so `carn close --merged-sha` is atomic — no window
+        // where merged_sha is set but the entry is still in-flight.
         const now = new Date().toISOString();
+        const current = parseEntry(await readJson(join(ctx.lease.path, toRel)));
         const moved = parseEntry({
-          ...parseEntry(await readJson(join(ctx.lease.path, toRel))),
+          ...current,
+          metadata: { ...current.metadata, ...(metadataPatch ?? {}) },
           closed_at: now,
           updated_at: now,
         });
