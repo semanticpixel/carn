@@ -8,6 +8,7 @@ export {
   type Entry,
   type EntryDraft,
   type AddEntryOptions,
+  type CloseEntryOptions,
   type ListEntriesOptions,
 } from './entry.js';
 export {

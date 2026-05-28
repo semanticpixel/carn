@@ -142,6 +142,8 @@ export function formatEntryRow(entry: Entry): string[] {
     shortDescription(entry.description),
     entry.ttl ?? '-',
     entry.author,
+    // AGE = time since last update (not creation). Matches ST-9 doctor's
+    // `updated_at`-based stale check; an entry "ages" by sitting untouched.
     humanAge(entry.updated_at),
   ];
 }

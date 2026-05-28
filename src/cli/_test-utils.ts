@@ -4,9 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _resetPurgeMemoForTests } from '../storage/worktree.js';
-import { CliError } from './context.js';
-import { ArgParseError } from './parse-args.js';
-import { z } from 'zod';
+import { runCarn } from '../cli.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -108,8 +106,14 @@ export async function runCli(
 
   process.chdir(cwd);
 
+  if (opts.stdin !== undefined) {
+    pushStdin(opts.stdin);
+  }
+
   try {
-    const code = await dispatch(args, opts.stdin);
+    // Drive the real `runCarn` from cli.ts — keeps the test harness honest
+    // about how the bin entry actually maps errors and resolves commands.
+    const code = await runCarn(['node', 'carn', ...args]);
     return { code, stdout, stderr };
   } finally {
     process.chdir(prevCwd);
@@ -119,79 +123,6 @@ export async function runCli(
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     }
-  }
-}
-
-async function dispatch(args: readonly string[], stdin: string | undefined): Promise<number> {
-  // Re-import here lazily so each test sees a fresh handler closure (matters
-  // for modules that memoise stuff like the no-origin warn set).
-  const { runInit } = await import('./init.js');
-  const { runAdd } = await import('./add.js');
-  const { runList } = await import('./list.js');
-  const { runShow } = await import('./show.js');
-  const { runClose } = await import('./close.js');
-  const { runQuery } = await import('./query.js');
-  const { topLevelHelp, suggestCommand, COMMANDS, VERSION } = await import('./help.js');
-
-  const handlers: Record<string, (a: readonly string[]) => Promise<number>> = {
-    init: runInit,
-    add: runAdd,
-    list: runList,
-    show: runShow,
-    close: runClose,
-    query: runQuery,
-  };
-
-  if (stdin !== undefined) {
-    pushStdin(stdin);
-  }
-
-  try {
-    if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
-      process.stdout.write(topLevelHelp());
-      return 0;
-    }
-    if (args[0] === '--version' || args[0] === '-v') {
-      process.stdout.write(`${VERSION}\n`);
-      return 0;
-    }
-    const cmd = args[0]!;
-    const rest = args.slice(1);
-    if (cmd === 'help') {
-      // Skip the per-command help registry; tests don't exercise the dispatcher's
-      // own help path directly.
-      process.stdout.write(topLevelHelp());
-      return 0;
-    }
-    if (!(cmd in handlers)) {
-      const hint = suggestCommand(cmd);
-      const known = COMMANDS.includes(cmd as never);
-      // (commands list reference suppresses an unused-import lint flag in CI)
-      void known;
-      process.stderr.write(
-        `carn: unknown command '${cmd}'${hint ? ` — did you mean '${hint}'?` : ''}\n`,
-      );
-      return 1;
-    }
-    return await handlers[cmd]!(rest);
-  } catch (err) {
-    if (err instanceof CliError) {
-      process.stderr.write(`error: ${err.message}\n`);
-      return err.exitCode;
-    }
-    if (err instanceof ArgParseError) {
-      process.stderr.write(`error: ${err.message}\n`);
-      return 1;
-    }
-    if (err instanceof z.ZodError) {
-      const msg = err.issues
-        .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
-        .join('; ');
-      process.stderr.write(`error: ${msg}\n`);
-      return 1;
-    }
-    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
-    return 2;
   }
 }
 

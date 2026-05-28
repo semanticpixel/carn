@@ -1,4 +1,4 @@
-import { closeEntry, updateEntry } from '../storage/entry.js';
+import { closeEntry } from '../storage/entry.js';
 import { CliError, resolveIdentity, resolveRepoRoot } from './context.js';
 import { formatJson, painter } from './format.js';
 import { parseArgs } from './parse-args.js';
@@ -36,15 +36,13 @@ export async function runClose(argv: readonly string[]): Promise<number> {
   const target = await resolveEntry(repoRoot, idArg);
 
   const mergedSha = parsed.flags['--merged-sha'];
-  if (typeof mergedSha === 'string' && mergedSha.length > 0 && target.closed_at === null) {
-    await updateEntry(
-      repoRoot,
-      target.id,
-      { metadata: { ...target.metadata, merged_sha: mergedSha } },
-      { identity },
-    );
-  }
-  const closed = await closeEntry(repoRoot, target.id, { identity });
+  const closed = await closeEntry(repoRoot, target.id, {
+    identity,
+    metadataPatch:
+      typeof mergedSha === 'string' && mergedSha.length > 0
+        ? { merged_sha: mergedSha }
+        : undefined,
+  });
 
   if (parsed.flags['--json']) {
     process.stdout.write(formatJson({ entry: closed }));

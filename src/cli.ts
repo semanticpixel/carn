@@ -37,9 +37,11 @@ const PER_COMMAND_HELP: Record<Exclude<CommandName, 'help'>, string> = {
   query: QUERY_HELP,
 };
 
-async function main(argv: readonly string[]): Promise<number> {
-  const args = argv.slice(2);
+function isKnownHandler(s: string): s is Exclude<CommandName, 'help'> {
+  return (COMMANDS as readonly string[]).includes(s) && s !== 'help';
+}
 
+async function dispatch(args: readonly string[]): Promise<number> {
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(topLevelHelp());
     return 0;
@@ -80,33 +82,47 @@ async function main(argv: readonly string[]): Promise<number> {
   return HANDLERS[cmd](rest);
 }
 
-function isKnownHandler(s: string): s is Exclude<CommandName, 'help'> {
-  return (COMMANDS as readonly string[]).includes(s) && s !== 'help';
-}
-
-main(process.argv)
-  .then((code) => process.exit(code))
-  .catch((err: unknown) => {
+/**
+ * Run the CLI with a full argv vector (`[node, carn, ...args]`). Exposed so
+ * the test harness (`src/cli/_test-utils.ts`) can drive the exact same
+ * dispatch + error-mapping path the bin entry uses — avoids drift where a
+ * new error class gets a custom exit code here but the test harness keeps
+ * its old copy.
+ */
+export async function runCarn(argv: readonly string[]): Promise<number> {
+  try {
+    return await dispatch(argv.slice(2));
+  } catch (err) {
     const p = painter(process.stderr);
     if (err instanceof CliError) {
       process.stderr.write(`${p.red('error:')} ${err.message}\n`);
-      process.exit(err.exitCode);
+      return err.exitCode;
     }
     if (err instanceof ArgParseError) {
       process.stderr.write(`${p.red('error:')} ${err.message}\n`);
-      process.exit(1);
+      return 1;
     }
     if (err instanceof z.ZodError) {
       process.stderr.write(`${p.red('error:')} ${formatZodIssues(err)}\n`);
-      process.exit(1);
+      return 1;
     }
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`${p.red('error:')} ${message}\n`);
-    process.exit(2);
-  });
+    return 2;
+  }
+}
 
 function formatZodIssues(err: z.ZodError): string {
   return err.issues
     .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
     .join('; ');
+}
+
+// Bin entry — only when invoked directly, not when imported by tests.
+import { pathToFileURL } from 'node:url';
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  runCarn(process.argv).then((code) => process.exit(code));
 }
