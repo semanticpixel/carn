@@ -1,5 +1,6 @@
 import { addEntry } from '../storage/entry.js';
 import type { EntryDraft } from '../types.js';
+import { TtlParseError, assertValidTtl } from '../ttl.js';
 import { CliError, resolveIdentity, resolveRepoRoot } from './context.js';
 import { formatJson, painter } from './format.js';
 import { parseArgs } from './parse-args.js';
@@ -85,6 +86,16 @@ export async function runAdd(argv: readonly string[]): Promise<number> {
   const ttl = parsed.flags['--ttl'];
   if (ttl !== undefined && typeof ttl !== 'string') {
     throw new CliError('--ttl must be a string like "7d" or "24h".');
+  }
+  // Validate at the CLI boundary so a typo'd `--ttl 7days` exits 1 with a
+  // pointed message instead of persisting and tripping ST-6's TTL scanner.
+  if (typeof ttl === 'string') {
+    try {
+      assertValidTtl(ttl);
+    } catch (err) {
+      if (err instanceof TtlParseError) throw new CliError(err.message);
+      throw err;
+    }
   }
 
   const draft = buildDraft(type, description, paths, ttl as string | undefined, parsed.flags);

@@ -1,4 +1,5 @@
 import { listEntries } from '../storage/entry.js';
+import { isExpired } from '../ttl.js';
 import type { Entry } from '../types.js';
 import { CliError, resolveRepoRoot } from './context.js';
 import { TABLE_HEADER, formatEntryRow, formatJson, painter, renderTable } from './format.js';
@@ -8,10 +9,13 @@ export const LIST_HELP = `
 carn list — list carn entries
 
 Usage:
-  carn list [--type <t>] [--author <email>] [--closed | --all] [--json]
+  carn list [--type <t>] [--author <email>] [--closed | --all]
+            [--exclude-expired] [--json]
 
 Defaults to in-flight (open) entries. Use --closed for the closed/ folder
 or --all for both. Columns: ID  TYPE  DESCRIPTION  TTL  AUTHOR  AGE.
+TTL column renders the remaining time (e.g. \`6d\`, \`4h\`) for entries
+with a TTL; \`EXPIRED\` for past-TTL in-flight entries.
 `.trimStart();
 
 export async function runList(argv: readonly string[]): Promise<number> {
@@ -21,6 +25,7 @@ export async function runList(argv: readonly string[]): Promise<number> {
       '--author': { kind: 'string' },
       '--closed': { kind: 'boolean' },
       '--all': { kind: 'boolean' },
+      '--exclude-expired': { kind: 'boolean' },
       '--json': { kind: 'boolean' },
       '--help': { kind: 'boolean', aliases: ['-h'] },
     },
@@ -49,6 +54,9 @@ export async function runList(argv: readonly string[]): Promise<number> {
   if (typeof authorFlag === 'string') {
     entries = entries.filter((e) => e.author === authorFlag);
   }
+  if (parsed.flags['--exclude-expired']) {
+    entries = entries.filter((e) => !isExpired(e));
+  }
 
   if (parsed.flags['--json']) {
     process.stdout.write(formatJson({ entries }));
@@ -66,6 +74,6 @@ function renderEntriesTable(entries: readonly Entry[]): void {
   }
   const p = painter();
   const header = TABLE_HEADER.map((h) => p.bold(h));
-  const rows = entries.map(formatEntryRow);
+  const rows = entries.map((e) => formatEntryRow(e, { paint: p }));
   process.stdout.write(renderTable(header, rows));
 }

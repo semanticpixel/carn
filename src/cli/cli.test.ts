@@ -199,6 +199,96 @@ describe('carn CLI — end-to-end', () => {
     expect(r.stdout).toContain('plain output');
   });
 
+  it('`carn add --ttl <bad>` exits 1 with a pointed error', async () => {
+    await runCli(repo.root, ['init']);
+    const r = await runCli(repo.root, [
+      'add',
+      'note',
+      '--type',
+      'forbid-pattern',
+      '--constraint',
+      'x',
+      '--ttl',
+      '7days',
+    ]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('--ttl');
+    expect(r.stderr).toContain('s|m|h|d|w');
+  });
+
+  it('`carn list --exclude-expired` filters past-TTL entries', async () => {
+    await runCli(repo.root, ['init']);
+    // Add with a 1-second TTL, wait past it, and confirm --exclude-expired
+    // removes it from list output. (Created_at + 1s is reliably past after a
+    // few seconds of test setup; a longer sleep would slow CI.)
+    const add = await runCli(repo.root, [
+      'add',
+      'short lived',
+      '--type',
+      'forbid-pattern',
+      '--constraint',
+      'x',
+      '--ttl',
+      '1s',
+      '--json',
+    ]);
+    expect(add.code).toBe(0);
+    await new Promise((r) => setTimeout(r, 1100));
+
+    const listAll = await runCli(repo.root, ['list', '--json']);
+    expect(JSON.parse(listAll.stdout).entries).toHaveLength(1);
+
+    const listFiltered = await runCli(repo.root, [
+      'list',
+      '--exclude-expired',
+      '--json',
+    ]);
+    expect(JSON.parse(listFiltered.stdout).entries).toHaveLength(0);
+  });
+
+  it('`carn close --auto-merged` closes entries whose merged_sha is on main', async () => {
+    await runCli(repo.root, ['init']);
+    // Land a commit on origin/main + capture its SHA.
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(`${repo.root}/feature.txt`, 'feature\n');
+    await execFileAsync('git', ['add', '.'], { cwd: repo.root });
+    await execFileAsync('git', ['commit', '-m', 'feat'], { cwd: repo.root });
+    const { stdout: shaOut } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+      cwd: repo.root,
+    });
+    const sha = shaOut.trim();
+    await execFileAsync('git', ['push', 'origin', 'main'], { cwd: repo.root });
+    await execFileAsync('git', ['fetch', 'origin'], { cwd: repo.root });
+
+    const add = await runCli(repo.root, [
+      'add',
+      'shipped',
+      '--type',
+      'forbid-pattern',
+      '--constraint',
+      'x',
+      '--json',
+    ]);
+    const id = JSON.parse(add.stdout).entry.id;
+    // Stamp the merged_sha by closing then re-opening logic — simpler: use
+    // the storage layer directly via update.
+    const { updateEntry } = await import('../storage/entry.js');
+    await updateEntry(repo.root, id, { metadata: { merged_sha: sha } });
+
+    const auto = await runCli(repo.root, ['close', '--auto-merged', '--json']);
+    expect(auto.code).toBe(0);
+    const parsed = JSON.parse(auto.stdout);
+    expect(parsed.closed).toHaveLength(1);
+    expect(parsed.closed[0].id).toBe(id);
+
+    // Second run is a no-op.
+    const second = await runCli(repo.root, ['close', '--auto-merged', '--json']);
+    expect(JSON.parse(second.stdout).closed).toHaveLength(0);
+  });
+
   it('errors with exit 1 when git user.email is unset', async () => {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
