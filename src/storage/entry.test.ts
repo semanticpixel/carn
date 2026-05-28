@@ -16,13 +16,13 @@ import type { EntryDraft } from '../types.js';
  * storage layer to validate every read/write against EntrySchema, so the
  * old free-form `{ note: 'x' }` shapes no longer pass.
  */
-function fpDraft(overrides: Partial<{ text: string; constraint: string }> = {}): EntryDraft {
+function fpDraft(overrides: Partial<{ description: string; constraint: string }> = {}): EntryDraft {
   return {
     type: 'forbid-pattern',
-    text: overrides.text ?? 'do not regress',
+    description: overrides.description ?? 'do not regress',
     constraint: overrides.constraint ?? 'no new `as Foo` casts',
-    paths: [],
-    ttl: null,
+    // `paths`, `ttl`, `metadata` are optional on EntryDraft (z.input — defaults
+    // apply on the schema side). Storage stamps id / author / *_at.
   };
 }
 import { CARN_REF, acquireWorktree, gitExec, revParse } from './worktree.js';
@@ -46,11 +46,11 @@ describe('entry — single-repo flow', () => {
     cleanups.push(sbx.cleanup);
 
     const before = await gitStatusSnapshot(sbx.root);
-    const entry = await addEntry(sbx.root, fpDraft({ text: 'hello' }));
+    const entry = await addEntry(sbx.root, fpDraft({ description: 'hello' }));
     const after = await gitStatusSnapshot(sbx.root);
 
     expect(entry.id).toHaveLength(8);
-    expect(entry).toMatchObject({ type: 'forbid-pattern', text: 'hello' });
+    expect(entry).toMatchObject({ type: 'forbid-pattern', description: 'hello' });
     expect(after).toBe(before);
 
     const fetched = await getEntry(sbx.root, entry.id);
@@ -60,7 +60,7 @@ describe('entry — single-repo flow', () => {
   it('getEntry returns null for an unknown id and for a malformed id', async () => {
     const sbx = await makeBareRepo();
     cleanups.push(sbx.cleanup);
-    await addEntry(sbx.root, fpDraft({ text: 'present' }));
+    await addEntry(sbx.root, fpDraft({ description: 'present' }));
 
     expect(await getEntry(sbx.root, 'nopeyyyz')).toBeNull();
     expect(await getEntry(sbx.root, 'not-a-valid-id')).toBeNull();
@@ -69,19 +69,19 @@ describe('entry — single-repo flow', () => {
   it('updateEntry merges patch + writes an `update` log line', async () => {
     const sbx = await makeBareRepo();
     cleanups.push(sbx.cleanup);
-    const entry = await addEntry(sbx.root, fpDraft({ text: 'first', constraint: 'first' }));
+    const entry = await addEntry(sbx.root, fpDraft({ description: 'first', constraint: 'first' }));
 
-    const updated = await updateEntry(sbx.root, entry.id, { text: 'second', constraint: 'second' });
+    const updated = await updateEntry(sbx.root, entry.id, { description: 'second', constraint: 'second' });
     expect(updated).toMatchObject({
       id: entry.id,
       type: 'forbid-pattern',
-      text: 'second',
+      description: 'second',
       constraint: 'second',
     });
 
     // Confirm the on-disk file is the merged shape.
     const fetched = await getEntry(sbx.root, entry.id);
-    expect(fetched).toMatchObject({ text: 'second', constraint: 'second' });
+    expect(fetched).toMatchObject({ description: 'second', constraint: 'second' });
 
     // Confirm the log got both `add` and `update`.
     const lease = await acquireWorktree(sbx.root);
@@ -97,11 +97,11 @@ describe('entry — single-repo flow', () => {
   it('closeEntry moves in-flight → closed and appends `close` to index.jsonl', async () => {
     const sbx = await makeBareRepo();
     cleanups.push(sbx.cleanup);
-    const entry = await addEntry(sbx.root, fpDraft({ text: 'to-close' }));
+    const entry = await addEntry(sbx.root, fpDraft({ description: 'to-close' }));
 
     const closed = await closeEntry(sbx.root, entry.id);
-    expect(closed).toMatchObject({ id: entry.id, text: 'to-close' });
-    expect(closed.closedAt).not.toBeNull();
+    expect(closed).toMatchObject({ id: entry.id, description: 'to-close' });
+    expect(closed.closed_at).not.toBeNull();
 
     const lease = await acquireWorktree(sbx.root);
     try {
@@ -127,7 +127,7 @@ describe('entry — single-repo flow', () => {
   it('closeEntry called twice on the same id is idempotent (no `nothing to commit` error)', async () => {
     const sbx = await makeBareRepo();
     cleanups.push(sbx.cleanup);
-    const entry = await addEntry(sbx.root, fpDraft({ text: 'reclose' }));
+    const entry = await addEntry(sbx.root, fpDraft({ description: 'reclose' }));
 
     const first = await closeEntry(sbx.root, entry.id);
     expect(first.id).toBe(entry.id);
@@ -165,8 +165,8 @@ describe('entry — sibling-worktree concurrency', () => {
 
     const before = await Promise.all([gitStatusSnapshot(a), gitStatusSnapshot(b)]);
     const [eA, eB] = await Promise.all([
-      addEntry(a, fpDraft({ text: 'from-a' })),
-      addEntry(b, fpDraft({ text: 'from-b' })),
+      addEntry(a, fpDraft({ description: 'from-a' })),
+      addEntry(b, fpDraft({ description: 'from-b' })),
     ]);
     const after = await Promise.all([gitStatusSnapshot(a), gitStatusSnapshot(b)]);
 
@@ -196,8 +196,8 @@ describe('entry — sibling-worktree concurrency', () => {
     expect(subjects.some((s) => s === 'carn: root')).toBe(true);
 
     // Pull entries back through the observer-side getEntry to confirm both are addressable.
-    expect((await getEntry(observer, eA.id))?.text).toBe('from-a');
-    expect((await getEntry(observer, eB.id))?.text).toBe('from-b');
+    expect((await getEntry(observer, eA.id))?.description).toBe('from-a');
+    expect((await getEntry(observer, eB.id))?.description).toBe('from-b');
   }, 30_000);
 });
 
@@ -205,7 +205,7 @@ describe('entry — no-origin behavior', () => {
   it('addEntry succeeds without a remote and updates the local carn ref', async () => {
     const sbx = await makeBareRepo();
     cleanups.push(sbx.cleanup);
-    const entry = await addEntry(sbx.root, fpDraft({ text: 'orphan' }));
+    const entry = await addEntry(sbx.root, fpDraft({ description: 'orphan' }));
 
     const ref = await revParse(sbx.root, CARN_REF);
     expect(ref).toBeTruthy();
@@ -214,7 +214,7 @@ describe('entry — no-origin behavior', () => {
     const head = await gitExec(sbx.root, ['rev-parse', 'HEAD']);
     expect(head.stdout.trim()).not.toBe(ref);
 
-    expect((await getEntry(sbx.root, entry.id))?.text).toBe('orphan');
+    expect((await getEntry(sbx.root, entry.id))?.description).toBe('orphan');
   });
 });
 
@@ -222,8 +222,8 @@ describe('entry — index.jsonl shape', () => {
   it('appends one line per op, parseable as JSON', async () => {
     const sbx = await makeBareRepo();
     cleanups.push(sbx.cleanup);
-    const a = await addEntry(sbx.root, fpDraft({ text: 'first' }));
-    await updateEntry(sbx.root, a.id, { text: 'second' });
+    const a = await addEntry(sbx.root, fpDraft({ description: 'first' }));
+    await updateEntry(sbx.root, a.id, { description: 'second' });
     await closeEntry(sbx.root, a.id);
 
     const lease = await acquireWorktree(sbx.root);

@@ -218,14 +218,18 @@ export async function addEntry(
     const id = opts.id ?? generateId();
     const filePath = entryPath(ctx.lease.path, 'in-flight', id);
     const now = new Date().toISOString();
-    // Stamp the storage-owned fields (id, createdAt, closedAt) onto the draft
-    // then validate the full Entry shape before any disk write. EntrySchema
-    // is the gate for both shape and the 50KB size cap.
+    // Stamp the storage-owned fields (id, author, *_at) onto the draft then
+    // validate the full Entry shape before any disk write. EntrySchema is
+    // the gate for both shape and the 50KB size cap. `author` is required
+    // in the schema; the storage layer fills it from the active git
+    // identity so CLI/MCP callers never have to thread it explicitly.
     const entry: Entry = parseEntry({
       ...(draft as Record<string, unknown>),
       id,
-      createdAt: now,
-      closedAt: null,
+      author: identity.email,
+      created_at: now,
+      updated_at: now,
+      closed_at: null,
     });
 
     await commitAndPushWithRetry(
@@ -324,15 +328,18 @@ export async function updateEntry(
           throw new Error(`Cannot update closed entry: ${id}`);
         }
         const current = parseEntry(await readJson(found.path));
+        // Bump updated_at on every update so ST-9's doctor "stale entry"
+        // scan has a single field to read instead of replaying index.jsonl.
+        const now = new Date().toISOString();
         // Validate the merged shape before writing — guarantees the on-disk
         // file is always a parseable Entry, including across type-changing
         // patches (e.g. swapping discriminator, adding required fields).
-        const next: Entry = parseEntry({ ...current, ...patch, id });
+        const next: Entry = parseEntry({ ...current, ...patch, id, updated_at: now });
         await writeJson(found.path, next);
         await appendIndexRecord(ctx.lease.path, {
           op: 'update',
           id,
-          at: new Date().toISOString(),
+          at: now,
         });
         updated = next;
       },
@@ -371,12 +378,14 @@ export async function closeEntry(
         await mkdir(join(ctx.lease.path, CLOSED_DIR), { recursive: true });
         // `git mv` keeps git's rename detection happy so the diff stays small.
         await gitExec(ctx.lease.path, ['mv', fromRel, toRel]);
-        // Stamp closedAt and rewrite the file with the validated shape — this
-        // way `parseEntry(closed/<id>.json)` always shows the moment of close.
+        // Stamp closed_at + bump updated_at and rewrite the file with the
+        // validated shape — `parseEntry(closed/<id>.json)` always shows the
+        // moment of close, and ST-9 doctor's stale check still sees the bump.
         const now = new Date().toISOString();
         const moved = parseEntry({
           ...parseEntry(await readJson(join(ctx.lease.path, toRel))),
-          closedAt: now,
+          closed_at: now,
+          updated_at: now,
         });
         await writeJson(join(ctx.lease.path, toRel), moved);
         await appendIndexRecord(ctx.lease.path, {
