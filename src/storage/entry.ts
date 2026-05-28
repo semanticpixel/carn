@@ -23,10 +23,9 @@ import {
   type GitIdentity,
   type WorktreeLease,
 } from './worktree.js';
+import { EntrySchema, parseEntry, type Entry, type EntryDraft } from '../types.js';
 
-// Permissive shape for ST-2. ST-3 swaps in Zod schemas and tightens the surface.
-export type Entry = { id: string } & Record<string, unknown>;
-export type EntryDraft = Omit<Record<string, unknown>, 'id'>;
+export type { Entry, EntryDraft } from '../types.js';
 
 export interface AddEntryOptions {
   id?: string;
@@ -218,7 +217,16 @@ export async function addEntry(
   return await withWorktree(repoRoot, identity, async (ctx) => {
     const id = opts.id ?? generateId();
     const filePath = entryPath(ctx.lease.path, 'in-flight', id);
-    const entry: Entry = { ...(draft as Record<string, unknown>), id };
+    const now = new Date().toISOString();
+    // Stamp the storage-owned fields (id, createdAt, closedAt) onto the draft
+    // then validate the full Entry shape before any disk write. EntrySchema
+    // is the gate for both shape and the 50KB size cap.
+    const entry: Entry = parseEntry({
+      ...(draft as Record<string, unknown>),
+      id,
+      createdAt: now,
+      closedAt: null,
+    });
 
     await commitAndPushWithRetry(
       repoRoot,
@@ -235,7 +243,7 @@ export async function addEntry(
         await appendIndexRecord(ctx.lease.path, {
           op: 'add',
           id,
-          at: new Date().toISOString(),
+          at: now,
         });
       },
       retryOnConflict,
@@ -257,8 +265,10 @@ export async function getEntry(
   return await withWorktree(repoRoot, DEFAULT_IDENTITY, async (ctx) => {
     const found = await findEntryFile(ctx.lease.path, id);
     if (!found) return null;
-    const data = (await readJson(found.path)) as Entry;
-    return data;
+    // parseEntry throws on malformed disk content rather than yielding a
+    // partial — matches the ST-3 hard rule: "malformed entries throw a
+    // descriptive error, not silently yield partials."
+    return parseEntry(await readJson(found.path));
   });
 }
 
@@ -282,8 +292,7 @@ export async function listEntries(
       const names = await readdir(dir);
       for (const name of names) {
         if (!name.endsWith('.json')) continue;
-        const entry = (await readJson(join(dir, name))) as Entry;
-        out.push(entry);
+        out.push(parseEntry(await readJson(join(dir, name))));
       }
     }
     out.sort((a, b) => a.id.localeCompare(b.id));
@@ -314,8 +323,11 @@ export async function updateEntry(
         if (found.status === 'closed') {
           throw new Error(`Cannot update closed entry: ${id}`);
         }
-        const current = (await readJson(found.path)) as Entry;
-        const next: Entry = { ...current, ...patch, id };
+        const current = parseEntry(await readJson(found.path));
+        // Validate the merged shape before writing — guarantees the on-disk
+        // file is always a parseable Entry, including across type-changing
+        // patches (e.g. swapping discriminator, adding required fields).
+        const next: Entry = parseEntry({ ...current, ...patch, id });
         await writeJson(found.path, next);
         await appendIndexRecord(ctx.lease.path, {
           op: 'update',
@@ -351,7 +363,7 @@ export async function closeEntry(
         const found = await findEntryFile(ctx.lease.path, id);
         if (!found) throw new EntryNotFoundError(id);
         if (found.status === 'closed') {
-          closed = (await readJson(found.path)) as Entry;
+          closed = parseEntry(await readJson(found.path));
           return;
         }
         const fromRel = join(IN_FLIGHT_DIR, `${id}.json`);
@@ -359,13 +371,20 @@ export async function closeEntry(
         await mkdir(join(ctx.lease.path, CLOSED_DIR), { recursive: true });
         // `git mv` keeps git's rename detection happy so the diff stays small.
         await gitExec(ctx.lease.path, ['mv', fromRel, toRel]);
-        const data = (await readJson(join(ctx.lease.path, toRel))) as Entry;
+        // Stamp closedAt and rewrite the file with the validated shape — this
+        // way `parseEntry(closed/<id>.json)` always shows the moment of close.
+        const now = new Date().toISOString();
+        const moved = parseEntry({
+          ...parseEntry(await readJson(join(ctx.lease.path, toRel))),
+          closedAt: now,
+        });
+        await writeJson(join(ctx.lease.path, toRel), moved);
         await appendIndexRecord(ctx.lease.path, {
           op: 'close',
           id,
-          at: new Date().toISOString(),
+          at: now,
         });
-        closed = data;
+        closed = moved;
       },
       retryOnConflict,
     );

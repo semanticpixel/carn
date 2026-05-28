@@ -9,6 +9,22 @@ import {
   listEntries,
   updateEntry,
 } from './entry.js';
+import type { EntryDraft } from '../types.js';
+
+/**
+ * Test helper: a minimal valid forbid-pattern draft. ST-3 hardened the
+ * storage layer to validate every read/write against EntrySchema, so the
+ * old free-form `{ note: 'x' }` shapes no longer pass.
+ */
+function fpDraft(overrides: Partial<{ text: string; constraint: string }> = {}): EntryDraft {
+  return {
+    type: 'forbid-pattern',
+    text: overrides.text ?? 'do not regress',
+    constraint: overrides.constraint ?? 'no new `as Foo` casts',
+    paths: [],
+    ttl: null,
+  };
+}
 import { CARN_REF, acquireWorktree, gitExec, revParse } from './worktree.js';
 import { EntryNotFoundError } from './errors.js';
 import { INDEX_LOG_PATH, readIndexLog } from './index-log.js';
@@ -30,11 +46,11 @@ describe('entry — single-repo flow', () => {
     cleanups.push(sbx.cleanup);
 
     const before = await gitStatusSnapshot(sbx.root);
-    const entry = await addEntry(sbx.root, { note: 'hello' });
+    const entry = await addEntry(sbx.root, fpDraft({ text: 'hello' }));
     const after = await gitStatusSnapshot(sbx.root);
 
     expect(entry.id).toHaveLength(8);
-    expect(entry).toMatchObject({ note: 'hello' });
+    expect(entry).toMatchObject({ type: 'forbid-pattern', text: 'hello' });
     expect(after).toBe(before);
 
     const fetched = await getEntry(sbx.root, entry.id);
@@ -44,7 +60,7 @@ describe('entry — single-repo flow', () => {
   it('getEntry returns null for an unknown id and for a malformed id', async () => {
     const sbx = await makeBareRepo();
     cleanups.push(sbx.cleanup);
-    await addEntry(sbx.root, { note: 'present' });
+    await addEntry(sbx.root, fpDraft({ text: 'present' }));
 
     expect(await getEntry(sbx.root, 'nopeyyyz')).toBeNull();
     expect(await getEntry(sbx.root, 'not-a-valid-id')).toBeNull();
@@ -53,14 +69,19 @@ describe('entry — single-repo flow', () => {
   it('updateEntry merges patch + writes an `update` log line', async () => {
     const sbx = await makeBareRepo();
     cleanups.push(sbx.cleanup);
-    const entry = await addEntry(sbx.root, { kind: 'note', body: 'first' });
+    const entry = await addEntry(sbx.root, fpDraft({ text: 'first', constraint: 'first' }));
 
-    const updated = await updateEntry(sbx.root, entry.id, { body: 'second', extra: 1 });
-    expect(updated).toMatchObject({ id: entry.id, body: 'second', extra: 1, kind: 'note' });
+    const updated = await updateEntry(sbx.root, entry.id, { text: 'second', constraint: 'second' });
+    expect(updated).toMatchObject({
+      id: entry.id,
+      type: 'forbid-pattern',
+      text: 'second',
+      constraint: 'second',
+    });
 
     // Confirm the on-disk file is the merged shape.
     const fetched = await getEntry(sbx.root, entry.id);
-    expect(fetched).toMatchObject({ body: 'second', extra: 1 });
+    expect(fetched).toMatchObject({ text: 'second', constraint: 'second' });
 
     // Confirm the log got both `add` and `update`.
     const lease = await acquireWorktree(sbx.root);
@@ -76,10 +97,11 @@ describe('entry — single-repo flow', () => {
   it('closeEntry moves in-flight → closed and appends `close` to index.jsonl', async () => {
     const sbx = await makeBareRepo();
     cleanups.push(sbx.cleanup);
-    const entry = await addEntry(sbx.root, { note: 'to-close' });
+    const entry = await addEntry(sbx.root, fpDraft({ text: 'to-close' }));
 
     const closed = await closeEntry(sbx.root, entry.id);
-    expect(closed).toMatchObject({ id: entry.id, note: 'to-close' });
+    expect(closed).toMatchObject({ id: entry.id, text: 'to-close' });
+    expect(closed.closedAt).not.toBeNull();
 
     const lease = await acquireWorktree(sbx.root);
     try {
@@ -105,7 +127,7 @@ describe('entry — single-repo flow', () => {
   it('closeEntry called twice on the same id is idempotent (no `nothing to commit` error)', async () => {
     const sbx = await makeBareRepo();
     cleanups.push(sbx.cleanup);
-    const entry = await addEntry(sbx.root, { note: 'reclose' });
+    const entry = await addEntry(sbx.root, fpDraft({ text: 'reclose' }));
 
     const first = await closeEntry(sbx.root, entry.id);
     expect(first.id).toBe(entry.id);
@@ -143,8 +165,8 @@ describe('entry — sibling-worktree concurrency', () => {
 
     const before = await Promise.all([gitStatusSnapshot(a), gitStatusSnapshot(b)]);
     const [eA, eB] = await Promise.all([
-      addEntry(a, { note: 'from-a' }),
-      addEntry(b, { note: 'from-b' }),
+      addEntry(a, fpDraft({ text: 'from-a' })),
+      addEntry(b, fpDraft({ text: 'from-b' })),
     ]);
     const after = await Promise.all([gitStatusSnapshot(a), gitStatusSnapshot(b)]);
 
@@ -174,8 +196,8 @@ describe('entry — sibling-worktree concurrency', () => {
     expect(subjects.some((s) => s === 'carn: root')).toBe(true);
 
     // Pull entries back through the observer-side getEntry to confirm both are addressable.
-    expect((await getEntry(observer, eA.id))?.note).toBe('from-a');
-    expect((await getEntry(observer, eB.id))?.note).toBe('from-b');
+    expect((await getEntry(observer, eA.id))?.text).toBe('from-a');
+    expect((await getEntry(observer, eB.id))?.text).toBe('from-b');
   }, 30_000);
 });
 
@@ -183,7 +205,7 @@ describe('entry — no-origin behavior', () => {
   it('addEntry succeeds without a remote and updates the local carn ref', async () => {
     const sbx = await makeBareRepo();
     cleanups.push(sbx.cleanup);
-    const entry = await addEntry(sbx.root, { note: 'orphan' });
+    const entry = await addEntry(sbx.root, fpDraft({ text: 'orphan' }));
 
     const ref = await revParse(sbx.root, CARN_REF);
     expect(ref).toBeTruthy();
@@ -192,7 +214,7 @@ describe('entry — no-origin behavior', () => {
     const head = await gitExec(sbx.root, ['rev-parse', 'HEAD']);
     expect(head.stdout.trim()).not.toBe(ref);
 
-    expect((await getEntry(sbx.root, entry.id))?.note).toBe('orphan');
+    expect((await getEntry(sbx.root, entry.id))?.text).toBe('orphan');
   });
 });
 
@@ -200,8 +222,8 @@ describe('entry — index.jsonl shape', () => {
   it('appends one line per op, parseable as JSON', async () => {
     const sbx = await makeBareRepo();
     cleanups.push(sbx.cleanup);
-    const a = await addEntry(sbx.root, { v: 1 });
-    await updateEntry(sbx.root, a.id, { v: 2 });
+    const a = await addEntry(sbx.root, fpDraft({ text: 'first' }));
+    await updateEntry(sbx.root, a.id, { text: 'second' });
     await closeEntry(sbx.root, a.id);
 
     const lease = await acquireWorktree(sbx.root);
