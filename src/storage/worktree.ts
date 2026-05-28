@@ -63,6 +63,15 @@ export async function gitExecWithStdin(
     child.stderr.on('data', (d) => {
       stderr += d.toString();
     });
+    // `git mktree </dev/null` (and similar) consumes no input and may close
+    // stdin before our `write` flushes. On Linux that surfaces as EPIPE; left
+    // unhandled it crashes the process even though the exit code is 0. Treat
+    // EPIPE as benign — the child's exit code is the authoritative signal.
+    child.stdin.on('error', (err) => {
+      if ((err as NodeJS.ErrnoException).code !== 'EPIPE') {
+        reject(err);
+      }
+    });
     child.on('error', reject);
     child.on('close', (code) => {
       const result: GitResult = { stdout, stderr, code: code ?? 0 };
