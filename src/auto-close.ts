@@ -31,10 +31,10 @@ export interface AutoCloseResult {
 }
 
 /**
- * Resolve the base ref. Order: explicit option → `origin/<HEAD>` from
- * `git remote show origin` → `origin/main` → `origin/master` → `main` →
- * `master`. The remote variants are checked first because that's what the
- * skill's PR-merge SHAs actually land on.
+ * Resolve the base ref. Order: explicit option → cached `origin/HEAD` →
+ * `origin/main` → `origin/master` → `main` → `master`. The remote
+ * variants are checked first because that's what the skill's PR-merge
+ * SHAs actually land on.
  */
 async function resolveBaseRef(
   repoRoot: string,
@@ -43,15 +43,17 @@ async function resolveBaseRef(
   if (explicit) return explicit;
 
   if (await hasOrigin(repoRoot)) {
-    const probe = await gitExec(repoRoot, ['remote', 'show', 'origin'], {
-      allowFailure: true,
-    });
+    // Read the cached HEAD-branch locally — no network round-trip.
+    // `git remote show origin` would fetch this from the remote, which
+    // hangs on the network timeout in sandboxed/offline CI runs.
+    const probe = await gitExec(
+      repoRoot,
+      ['symbolic-ref', '--short', '--quiet', 'refs/remotes/origin/HEAD'],
+      { allowFailure: true },
+    );
     if (probe.code === 0) {
-      const match = probe.stdout.match(/HEAD branch:\s*(\S+)/);
-      if (match) {
-        const remoteRef = `origin/${match[1]}`;
-        if (await refExists(repoRoot, remoteRef)) return remoteRef;
-      }
+      const remoteRef = probe.stdout.trim();
+      if (remoteRef && (await refExists(repoRoot, remoteRef))) return remoteRef;
     }
     for (const candidate of ['origin/main', 'origin/master']) {
       if (await refExists(repoRoot, candidate)) return candidate;
@@ -106,6 +108,14 @@ function extractMergedSha(entry: Entry): string | null {
  * This is the engine behind `carn close --auto-merged`. ST-9's doctor
  * calls it internally too, so the bare repo-state side-effects (close
  * commits + index updates) are the same as a manual `carn close`.
+ *
+ * Note on the "in-flight with merged_sha" preconditions: ST-6 ships the
+ * scanner but no CLI surface yet puts `merged_sha` on an in-flight entry
+ * (`carn close --merged-sha` stamps atomically with the close). The
+ * production producer of that state is ST-16's GitHub backend — when a
+ * PR opens, it'll stamp the eventual merge SHA onto the in-flight entry
+ * so this scanner can close it once the SHA lands on main. Until then,
+ * the unit-test fixture sets the field via `updateEntry` directly.
  */
 export async function autoCloseMergedEntries(
   repoRoot: string,
