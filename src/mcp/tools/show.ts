@@ -11,7 +11,12 @@ export function registerShowTool(server: McpServer, ctx: CarnToolContext): void 
       description:
         'Fetch a single carn entry by its 8-character id (or unique id prefix). Use this when an entry surfaced by `carn_query` / `carn_list` referenced another id and you need the full content. Ambiguous prefixes return an error listing the matching ids.',
       inputSchema: {
-        id: z.string().min(1),
+        id: z
+          .string()
+          .min(1)
+          .describe(
+            'The entry id — full 8 chars (e.g. `abc23xyz`) or a unique prefix. Ambiguous prefixes return an error listing the matches.',
+          ),
       },
     },
     async (input) =>

@@ -4,13 +4,15 @@ import { EntryRefError } from '../../lib/index.js';
 
 /**
  * The set of v1 entry type discriminants, as a Zod enum reused across the
- * `register` / `query` / `list` tool inputs.
+ * `register` / `query` / `list` tool inputs. The `.describe()` is what the
+ * MCP SDK forwards to the LLM — without it, the model only sees the
+ * union members and is left guessing semantics from the names.
  */
-export const EntryTypeSchema = z.enum([
-  'forbid-pattern',
-  'prefer-pattern',
-  'coordinate',
-]);
+export const EntryTypeSchema = z
+  .enum(['forbid-pattern', 'prefer-pattern', 'coordinate'])
+  .describe(
+    'Entry kind. `forbid-pattern` and `prefer-pattern` require a `constraint`; `coordinate` requires a `reason`.',
+  );
 
 /**
  * Wrap a tool body so its return value is shaped as MCP `text` content

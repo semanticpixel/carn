@@ -11,10 +11,26 @@ export function registerListTool(server: McpServer, ctx: CarnToolContext): void 
       description:
         'List carn entries — defaults to in-flight (open). Use this for a broad inventory across the repo, not for "what applies to my current edit" (that\'s `carn_query`). Useful at the start of a session to scan recent entries, or with `status="closed"` to audit what shipped.',
       inputSchema: {
-        status: z.enum(['in-flight', 'closed', 'all']).optional(),
-        type: EntryTypeSchema.optional(),
-        author: z.string().min(1).optional(),
-        exclude_expired: z.boolean().optional(),
+        status: z
+          .enum(['in-flight', 'closed', 'all'])
+          .optional()
+          .describe(
+            'Which entries to return. Default `in-flight` (open). `closed` shows only the archive; `all` returns both.',
+          ),
+        type: EntryTypeSchema.optional().describe(
+          'Optional. Restrict to one entry kind.',
+        ),
+        author: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Optional. Filter by `author` (an email — same value `carn_register` records from `git config user.email`).',
+          ),
+        exclude_expired: z
+          .boolean()
+          .optional()
+          .describe('When true, past-TTL entries are dropped from the result.'),
       },
     },
     async (input) =>
