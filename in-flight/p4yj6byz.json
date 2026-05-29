@@ -1,0 +1,15 @@
+{
+  "type": "coordinate",
+  "id": "p4yj6byz",
+  "description": "Building carn doctor; coordinate before touching src/doctor.ts or src/cli/doctor.ts src/cli/doctor.ts",
+  "paths": [
+    "src/doctor.ts"
+  ],
+  "author": "lui1423@gmail.com",
+  "created_at": "2026-05-29T15:47:05.145Z",
+  "updated_at": "2026-05-29T15:47:05.145Z",
+  "closed_at": null,
+  "ttl": "2d",
+  "metadata": {},
+  "reason": "Active development on ST-9; doctor logic touches every storage check — review PR before changes"
+}
