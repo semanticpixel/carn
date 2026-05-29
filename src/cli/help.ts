@@ -8,6 +8,8 @@ export const COMMANDS = [
   'close',
   'query',
   'mcp',
+  'install',
+  'hook',
   'help',
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
@@ -29,6 +31,8 @@ ${p.bold('Commands:')}
   ${p.cyan('close')}     Close an entry
   ${p.cyan('query')}     Find entries whose paths overlap one or more queries (agent read API)
   ${p.cyan('mcp')}       Start the MCP server over stdio (for Claude Code / other MCP clients)
+  ${p.cyan('install')}   Install hook config into Claude Code's settings.json
+  ${p.cyan('hook')}      Internal: run a Claude Code hook event handler
   ${p.cyan('help')}      Show this message, or help for a single command
 
 ${p.bold('Flags:')}
