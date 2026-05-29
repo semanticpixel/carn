@@ -127,6 +127,46 @@ carn server:
 carn mcp                           # starts the MCP server on stdio
 ```
 
+## Examples
+
+Three worked walkthroughs:
+
+- [examples/typecast-removal.md](./examples/typecast-removal.md) —
+  `forbid-pattern` for an in-flight tightening
+- [examples/coordinate-refactor.md](./examples/coordinate-refactor.md) —
+  `coordinate` for cross-team work
+- [examples/prefer-pattern-migration.md](./examples/prefer-pattern-migration.md) —
+  `prefer-pattern` for a gradual API migration
+
+## Health check
+
+```bash
+carn doctor                        # TTL expired, schema violations,
+                                   # branch drift, stale hooks, ...
+carn doctor --fix                  # apply the auto-fixable subset
+carn doctor --json                 # machine-readable report
+```
+
+Exit codes: `0` clean, `1` warnings only, `2` errors.
+
+## FAQ
+
+**Can I use carn without Claude Code?**
+Yes. The CLI is the primary surface; the MCP server works with any
+MCP client (Codex, Cursor, OpenCode). Claude Code's hook is one
+convenience integration, not a requirement.
+
+**What about Cursor / Codex?**
+Add the MCP server to their config — `carn mcp` over stdio. The six
+tools (`carn_register`, `carn_query`, `carn_list`, `carn_show`,
+`carn_close`, `carn_update`) work the same as the CLI commands.
+
+**How do I keep CI from running on the carn branch?**
+Add `carn` to your branch protection's "ignore for CI" list, or
+gate your workflows on `if: github.ref != 'refs/heads/carn'`.
+carn's storage is just JSON files — your test suite has nothing
+useful to say about it.
+
 ## Why an orphan branch?
 
 - **No infra.** Git is the network. Already authenticated, already shared,
@@ -139,8 +179,10 @@ carn mcp                           # starts the MCP server on stdio
 
 ## Status
 
-Pre-alpha. v1 covers live constraints. v2 will add breadcrumbs and decisions.
-See [PLAN.md](./PLAN.md) for the roadmap.
+v0.1.0 — initial release. Covers live constraints (`forbid-pattern`,
+`prefer-pattern`, `coordinate`). v2 will add breadcrumbs and decisions.
+See [PLAN.md](./PLAN.md) for the roadmap and
+[CHANGELOG.md](./CHANGELOG.md) for release notes.
 
 ## License
 
