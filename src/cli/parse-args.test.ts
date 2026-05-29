@@ -46,6 +46,90 @@ describe('parseArgs — flag shapes', () => {
     expect(out.flags['--paths']).toEqual(['a', 'b', 'c']);
   });
 
+  it('array flags greedily consume consecutive non-flag values', () => {
+    const out = parseArgs(['--paths', 'a', 'b', 'c'], {
+      flags: { '--paths': { kind: 'array' } },
+    });
+    expect(out.flags['--paths']).toEqual(['a', 'b', 'c']);
+    expect(out.positionals).toEqual([]);
+  });
+
+  it('greedy consumption stops at the next flag', () => {
+    const out = parseArgs(
+      ['--paths', 'a', 'b', '--reason', 'r'],
+      {
+        flags: {
+          '--paths': { kind: 'array' },
+          '--reason': { kind: 'string' },
+        },
+      },
+    );
+    expect(out.flags['--paths']).toEqual(['a', 'b']);
+    expect(out.flags['--reason']).toBe('r');
+    expect(out.positionals).toEqual([]);
+  });
+
+  it('greedy consumption stops at the `--` positional terminator', () => {
+    const out = parseArgs(['--paths', 'a', 'b', '--', 'rest', 'tokens'], {
+      flags: { '--paths': { kind: 'array' } },
+    });
+    expect(out.flags['--paths']).toEqual(['a', 'b']);
+    expect(out.positionals).toEqual(['rest', 'tokens']);
+  });
+
+  it('greedy + repeated combine — `--paths a b --paths c d` → [a,b,c,d]', () => {
+    const out = parseArgs(['--paths', 'a', 'b', '--paths', 'c', 'd'], {
+      flags: { '--paths': { kind: 'array' } },
+    });
+    expect(out.flags['--paths']).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('inline `--flag=value` is bounded — does NOT greedily consume', () => {
+    // `=` is the explicit value-boundary convention (kubectl, cargo, git).
+    // Users who want to add more values can repeat the flag or use the
+    // next-slot form.
+    const out = parseArgs(['--paths=a', 'b', 'c'], {
+      flags: { '--paths': { kind: 'array' } },
+    });
+    expect(out.flags['--paths']).toEqual(['a']);
+    expect(out.positionals).toEqual(['b', 'c']);
+  });
+
+  it('greedy treats a bare `-` as a value (stdin convention), not a flag', () => {
+    const out = parseArgs(['--paths', 'a', '-', 'b'], {
+      flags: { '--paths': { kind: 'array' } },
+    });
+    expect(out.flags['--paths']).toEqual(['a', '-', 'b']);
+  });
+
+  it('greedy does NOT affect non-array kind flags — `string` still takes one value', () => {
+    const out = parseArgs(['--type', 'forbid', 'leftover'], {
+      flags: { '--type': { kind: 'string' } },
+    });
+    expect(out.flags['--type']).toBe('forbid');
+    expect(out.positionals).toEqual(['leftover']);
+  });
+
+  it('positional before greedy array — description then paths works as users expect', () => {
+    // The dogfooding bug that motivated this change:
+    //   carn add "desc" --type coordinate --paths a b c --reason r
+    // should produce description="desc", paths=[a,b,c], reason="r".
+    const out = parseArgs(
+      ['desc', '--type', 'coordinate', '--paths', 'a', 'b', 'c', '--reason', 'r'],
+      {
+        flags: {
+          '--type': { kind: 'string' },
+          '--paths': { kind: 'array' },
+          '--reason': { kind: 'string' },
+        },
+      },
+    );
+    expect(out.positionals).toEqual(['desc']);
+    expect(out.flags['--type']).toBe('coordinate');
+    expect(out.flags['--paths']).toEqual(['a', 'b', 'c']);
+    expect(out.flags['--reason']).toBe('r');
+  });
+
   it('resolves aliases (e.g. -h → --help)', () => {
     const out = parseArgs(['-h'], {
       flags: { '--help': { kind: 'boolean', aliases: ['-h'] } },
