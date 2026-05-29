@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,7 +14,7 @@ import {
 import { addEntry, getEntry } from './storage/entry.js';
 import { ttlExpiresAt, isExpired } from './ttl.js';
 import { runDoctor } from './doctor.js';
-import { makeFixtureRepo, type FixtureRepo } from './test-utils/fixture-repo.js';
+import { makeFixtureRepo, runCli, type FixtureRepo } from './test-utils/index.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -197,6 +197,139 @@ describe('Storage crash mid-op recovered by doctor --fix', () => {
   });
 });
 
+describe('MCP stdio subprocess — JSON-RPC round-trip over real pipes', () => {
+  /**
+   * In-process `InMemoryTransport` coverage already exists in
+   * `src/mcp/server.test.ts`. This test specifically backstops the
+   * *stdio* path — NDJSON framing across pipe writes, stdin EOF
+   * handling, the bundled `dist/cli.js mcp` entry actually running in
+   * its published shape (tsup excludes, shebang interaction, etc.).
+   * That's the wire-level surface an in-process transport can't
+   * reproduce.
+   *
+   * Skipped when `dist/cli.js` is absent — `pnpm build` precedes
+   * `pnpm test` in CI per the spec's acceptance, but local `pnpm test`
+   * runs without a fresh build are common. Don't fail the suite for
+   * that; document the gap by skip-marker instead.
+   */
+  const CLI_PATH = join(process.cwd(), 'dist', 'cli.js');
+
+  it.skipIf(!existsSync(CLI_PATH))(
+    'tools/list returns the six v1 tools when invoked over stdio',
+    async () => {
+      active = await makeFixtureRepo({ withCarn: true });
+      const child = spawn('node', [CLI_PATH, 'mcp'], {
+        cwd: active.root,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+
+      try {
+        const reply = await rpcRoundTrip(child);
+        // MCP returns tool descriptors; we only assert the six names so a
+        // future description tweak doesn't break the smoke.
+        const names = (reply.result as { tools: Array<{ name: string }> }).tools.map(
+          (t) => t.name,
+        );
+        expect(names).toEqual(
+          expect.arrayContaining([
+            'carn_register',
+            'carn_query',
+            'carn_list',
+            'carn_show',
+            'carn_close',
+            'carn_update',
+          ]),
+        );
+      } finally {
+        child.kill('SIGTERM');
+        await new Promise<void>((resolve) => child.on('exit', () => resolve()));
+      }
+    },
+    20_000,
+  );
+});
+
+interface JsonRpcMessage {
+  jsonrpc: '2.0';
+  id?: number;
+  method?: string;
+  params?: unknown;
+  result?: unknown;
+  error?: unknown;
+}
+
+/**
+ * Drive the MCP `initialize` → `notifications/initialized` →
+ * `tools/list` sequence over the child's stdio and return the
+ * `tools/list` response. Messages are NDJSON-framed (one JSON object
+ * per line) per the stdio transport contract.
+ */
+async function rpcRoundTrip(child: ReturnType<typeof spawn>): Promise<JsonRpcMessage> {
+  const stdout = child.stdout;
+  const stdin = child.stdin;
+  if (!stdout || !stdin) throw new Error('child stdio is not piped');
+
+  let buffer = '';
+  const responses: JsonRpcMessage[] = [];
+  const waiters: Array<(msg: JsonRpcMessage) => void> = [];
+
+  stdout.on('data', (chunk: Buffer) => {
+    buffer += chunk.toString('utf8');
+    let nl: number;
+    while ((nl = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (!line) continue;
+      try {
+        const msg = JSON.parse(line) as JsonRpcMessage;
+        if (waiters.length > 0 && msg.id !== undefined) {
+          const w = waiters.shift()!;
+          w(msg);
+        } else {
+          responses.push(msg);
+        }
+      } catch {
+        /* ignore non-JSON lines (e.g. log noise) */
+      }
+    }
+  });
+
+  const send = (msg: JsonRpcMessage): void => {
+    stdin.write(`${JSON.stringify(msg)}\n`);
+  };
+
+  const expectId = (id: number): Promise<JsonRpcMessage> =>
+    new Promise((resolve) => {
+      const matched = responses.findIndex((m) => m.id === id);
+      if (matched !== -1) {
+        const [m] = responses.splice(matched, 1);
+        resolve(m!);
+      } else {
+        waiters.push((m) => {
+          if (m.id === id) resolve(m);
+          else waiters.push((next) => resolve(next));
+        });
+      }
+    });
+
+  send({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'smoke', version: '0.0.0' },
+    },
+  });
+  await expectId(1);
+
+  send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+
+  send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
+  return expectId(2);
+}
+
 describe('CLI exit codes — known error paths return the documented codes', () => {
   /**
    * Sanity-check the contract documented in `--help`: 0 success, 1 user
@@ -205,8 +338,7 @@ describe('CLI exit codes — known error paths return the documented codes', () 
    * accidentally renumber what users + scripts depend on.
    */
   it('unknown command → 1', async () => {
-    const { runCli, makeFixtureRepo: makeCli } = await import('./cli/_test-utils.js');
-    const repo = await makeCli();
+    const repo = await makeFixtureRepo();
     try {
       const res = await runCli(repo.root, ['frobnicate']);
       expect(res.code).toBe(1);
@@ -217,8 +349,7 @@ describe('CLI exit codes — known error paths return the documented codes', () 
   });
 
   it('show with missing id → 1', async () => {
-    const { runCli, makeFixtureRepo: makeCli } = await import('./cli/_test-utils.js');
-    const repo = await makeCli();
+    const repo = await makeFixtureRepo();
     try {
       const res = await runCli(repo.root, ['show', 'doesnotex']);
       expect(res.code).toBe(1);
@@ -228,8 +359,7 @@ describe('CLI exit codes — known error paths return the documented codes', () 
   });
 
   it('add with bad --ttl → 1', async () => {
-    const { runCli, makeFixtureRepo: makeCli } = await import('./cli/_test-utils.js');
-    const repo = await makeCli();
+    const repo = await makeFixtureRepo();
     try {
       const res = await runCli(repo.root, [
         'add',
