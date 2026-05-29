@@ -35,10 +35,33 @@ export interface InstallResult {
   skipped: boolean;
 }
 
-export const CARN_HOOK_MARKER = 'carn hook user-prompt-submit';
+/**
+ * Substring used to recognise carn's UserPromptSubmit hook within an
+ * existing `settings.json`. Intentionally narrow to the subcommand suffix
+ * so both the legacy `carn hook user-prompt-submit` form and the new
+ * absolute-path form (`<node> <entry> hook user-prompt-submit`) match.
+ */
+export const CARN_HOOK_MARKER = 'hook user-prompt-submit';
 
+/**
+ * Lock the absolute path at install time. `carn` may not be on the shell's
+ * PATH when Claude Code spawns the hook — on macOS especially, GUI-spawned
+ * shells get a stripped `launchd` PATH (`/usr/bin:/bin:/usr/sbin:/sbin`)
+ * that doesn't include npm-global / homebrew / cargo bins. Surfaced as
+ * `/bin/sh: carn: command not found` in real-Claude smoke even with carn
+ * on the user's terminal PATH.
+ *
+ * Using `process.execPath` (the node binary currently running this install)
+ * plus the path to the CLI entry (`process.argv[1]`) gives a portable,
+ * PATH-independent command that works in both pre-publish (`node
+ * dist/cli.js`) and post-publish (`node <npm-prefix>/lib/node_modules/carn/
+ * dist/cli.js`) invocations. `JSON.stringify` quotes the path so spaces
+ * don't break shell tokenisation.
+ */
 export function defaultCommand(): string {
-  return CARN_HOOK_MARKER;
+  const entry = process.argv[1];
+  if (!entry) return CARN_HOOK_MARKER;
+  return `${process.execPath} ${JSON.stringify(entry)} hook user-prompt-submit`;
 }
 
 export function resolveSettingsPath(opts: InstallOptions): string {

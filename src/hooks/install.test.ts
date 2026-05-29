@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CARN_HOOK_MARKER, installHook, resolveSettingsPath } from './install.js';
+import { CARN_HOOK_MARKER, defaultCommand, installHook, resolveSettingsPath } from './install.js';
 
 describe('installHook — project target', () => {
   let cwd = '';
@@ -127,5 +127,31 @@ describe('resolveSettingsPath', () => {
     expect(resolveSettingsPath({ target: 'user', home: '/Users/me' })).toBe(
       '/Users/me/.claude/settings.json',
     );
+  });
+});
+
+describe('defaultCommand', () => {
+  it('embeds the absolute node binary path so the hook works under Claude Code\'s minimal-PATH shell', () => {
+    const cmd = defaultCommand();
+    expect(cmd).toContain(process.execPath);
+    expect(cmd).toContain('hook user-prompt-submit');
+  });
+});
+
+describe('installHook — written command is PATH-independent', () => {
+  let cwd = '';
+  beforeEach(async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'carn-install-pathfree-'));
+  });
+  afterEach(async () => {
+    if (cwd) await rm(cwd, { recursive: true, force: true });
+  });
+
+  it('writes an absolute node-binary command (not bare `carn`)', async () => {
+    const result = await installHook({ target: 'project', cwd });
+    const parsed = JSON.parse(await readFile(result.path, 'utf8'));
+    const cmd = parsed.hooks.UserPromptSubmit[0].hooks[0].command;
+    expect(cmd).toContain(process.execPath);
+    expect(cmd).toContain('hook user-prompt-submit');
   });
 });
