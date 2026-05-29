@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { makeSandbox } from '../storage/_test-utils.js';
 import { registerCarnTools } from './tools/index.js';
@@ -19,6 +20,20 @@ const TEST_IDENTITY: GitIdentity = {
   name: 'mcp-test',
   email: 'mcp@test.local',
 };
+
+/**
+ * Wrap `client.callTool` to always pass `CallToolResultSchema`, which
+ * narrows the return type to the modern `CallToolResult` shape and away
+ * from the deprecated `CompatibilityCallToolResult` (`{ toolResult }`).
+ * Without this, `result.content` is `unknown` to TS.
+ */
+async function callCarnTool(
+  client: Client,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<Awaited<ReturnType<typeof Client.prototype.callTool>>> {
+  return client.callTool({ name, arguments: args }, CallToolResultSchema);
+}
 
 async function makeClientServerPair(
   repoRoot: string,
@@ -45,8 +60,17 @@ interface ToolText {
   text?: string;
 }
 
-function readText(result: { content?: ToolText[] }): unknown {
-  const text = result.content?.[0]?.text;
+/**
+ * `callTool()` returns a union including the deprecated
+ * `CompatibilityCallToolResult` shape (`{ toolResult }`, no `content`).
+ * Tests always pass `CallToolResultSchema` so the runtime value is the
+ * modern shape, but the static type stays a union — this helper takes
+ * `unknown` and narrows structurally.
+ */
+function readText(result: unknown): unknown {
+  const content = (result as { content?: unknown }).content;
+  const arr = Array.isArray(content) ? (content as ToolText[]) : [];
+  const text = arr[0]?.text;
   if (typeof text !== 'string') {
     throw new Error(`tool returned no text content: ${JSON.stringify(result)}`);
   }
@@ -107,7 +131,7 @@ describe('MCP server — tool round-trip', () => {
           constraint: 'no `as Foo` here',
           paths: ['src/auth/**'],
         },
-      }),
+      }, CallToolResultSchema),
     ) as { entry: { id: string; type: string } };
     expect(registered.entry.id).toMatch(/^[a-z2-9]{8}$/);
     expect(registered.entry.type).toBe('forbid-pattern');
@@ -116,7 +140,7 @@ describe('MCP server — tool round-trip', () => {
       await pair.client.callTool({
         name: 'carn_query',
         arguments: { paths: ['src/auth/login.ts'] },
-      }),
+      }, CallToolResultSchema),
     ) as { entries: Array<{ id: string }> };
     expect(queried.entries.map((e) => e.id)).toContain(registered.entry.id);
 
@@ -124,7 +148,7 @@ describe('MCP server — tool round-trip', () => {
       await pair.client.callTool({
         name: 'carn_show',
         arguments: { id: registered.entry.id },
-      }),
+      }, CallToolResultSchema),
     ) as { entry: { id: string } };
     expect(shown.entry.id).toBe(registered.entry.id);
 
@@ -132,7 +156,7 @@ describe('MCP server — tool round-trip', () => {
       await pair.client.callTool({
         name: 'carn_update',
         arguments: { id: registered.entry.id, patch: { description: 'updated note' } },
-      }),
+      }, CallToolResultSchema),
     ) as { entry: { description: string } };
     expect(updated.entry.description).toBe('updated note');
 
@@ -140,7 +164,7 @@ describe('MCP server — tool round-trip', () => {
       await pair.client.callTool({
         name: 'carn_close',
         arguments: { id: registered.entry.id, merged_sha: 'deadbeef' },
-      }),
+      }, CallToolResultSchema),
     ) as { entry: { closed_at: string | null; metadata: { merged_sha?: string } } };
     expect(closed.entry.closed_at).not.toBeNull();
     expect(closed.entry.metadata.merged_sha).toBe('deadbeef');
@@ -157,18 +181,18 @@ describe('MCP server — tool round-trip', () => {
       await pair.client.callTool({
         name: 'carn_register',
         arguments: { type: 'coordinate', description: 'r', reason: 'mid' },
-      }),
+      }, CallToolResultSchema),
     ) as { entry: { id: string } };
     await pair.client.callTool({
       name: 'carn_close',
       arguments: { id: registered.entry.id },
-    });
+    }, CallToolResultSchema);
 
     const inflight = readText(
       await pair.client.callTool({
         name: 'carn_list',
         arguments: { status: 'in-flight' },
-      }),
+      }, CallToolResultSchema),
     ) as { entries: Array<{ id: string }> };
     expect(inflight.entries).toHaveLength(0);
 
@@ -176,7 +200,7 @@ describe('MCP server — tool round-trip', () => {
       await pair.client.callTool({
         name: 'carn_list',
         arguments: { status: 'all' },
-      }),
+      }, CallToolResultSchema),
     ) as { entries: Array<{ id: string }> };
     expect(all.entries.map((e) => e.id)).toContain(registered.entry.id);
   });
@@ -191,7 +215,7 @@ describe('MCP server — tool round-trip', () => {
     const result = await pair.client.callTool({
       name: 'carn_show',
       arguments: { id: 'zzzzzzzz' },
-    });
+    }, CallToolResultSchema);
     expect((result as { isError?: boolean }).isError).toBe(true);
     const text = (result.content as ToolText[])[0]?.text ?? '';
     expect(text).toContain('zzzzzzzz');
