@@ -1,0 +1,16 @@
+{
+  "type": "coordinate",
+  "id": "9dmh6wn7",
+  "description": "Building smoke test coverage; coordinate before touching src/test-utils/** or adding tests across src/**",
+  "paths": [
+    "src/test-utils/**",
+    "src/**/*.test.ts"
+  ],
+  "author": "lui1423@gmail.com",
+  "created_at": "2026-05-29T16:15:28.225Z",
+  "updated_at": "2026-05-29T16:15:28.225Z",
+  "closed_at": null,
+  "ttl": "2d",
+  "metadata": {},
+  "reason": "Active development on ST-10; large cross-cutting test additions — review PR before parallel test edits"
+}
