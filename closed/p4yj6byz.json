@@ -7,9 +7,11 @@
   ],
   "author": "lui1423@gmail.com",
   "created_at": "2026-05-29T15:47:05.145Z",
-  "updated_at": "2026-05-29T15:47:05.145Z",
-  "closed_at": null,
+  "updated_at": "2026-05-29T16:34:50.334Z",
+  "closed_at": "2026-05-29T16:34:50.334Z",
   "ttl": "2d",
-  "metadata": {},
+  "metadata": {
+    "merged_sha": "180682972b29a9b91d5c5ec132c3a1e210069ff0"
+  },
   "reason": "Active development on ST-9; doctor logic touches every storage check — review PR before changes"
 }
