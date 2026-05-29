@@ -1,6 +1,6 @@
 {
   "name": "carn",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Live, typed, repo-scoped context for AI agents and the humans they work with.",
   "type": "module",
   "packageManager": "pnpm@10.30.3",
@@ -8,7 +8,22 @@
     "carn": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "mcp",
+    "context",
+    "git",
+    "cli"
   ],
   "scripts": {
     "build": "tsup",
