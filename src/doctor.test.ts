@@ -299,6 +299,121 @@ describe('runDoctor', () => {
     expect(e2.id.length).toBe(8);
   });
 
+  it('hook-stale flags a settings.json whose hook path no longer resolves', async () => {
+    const settingsDir = await mkdtemp(join(tmpdir(), 'carn-hookstale-'));
+    const settingsPath = join(settingsDir, 'settings.json');
+    const bogusExe = join(settingsDir, 'definitely-not-here', 'bin', 'node');
+    const bogusEntry = join(settingsDir, 'definitely-not-here', 'cli.js');
+    await writeFile(
+      settingsPath,
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            {
+              matcher: '',
+              hooks: [
+                {
+                  type: 'command',
+                  command: `${bogusExe} "${bogusEntry}" hook user-prompt-submit`,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      'utf8',
+    );
+
+    const report = await runDoctor(repo, { hookSettingsPaths: [settingsPath] });
+    const stale = report.checks.filter((c) => c.code === 'hook-stale');
+    expect(stale.length).toBeGreaterThanOrEqual(1);
+    expect(stale[0]!.severity).toBe('warn');
+    expect(stale[0]!.fixable).toBe(false);
+    expect(stale[0]!.message).toContain('carn install hooks');
+    await rm(settingsDir, { recursive: true, force: true });
+  });
+
+  it('hook-stale is silent when the configured hook command resolves', async () => {
+    const settingsDir = await mkdtemp(join(tmpdir(), 'carn-hookok-'));
+    const settingsPath = join(settingsDir, 'settings.json');
+    // Use the running node binary — guaranteed to exist + resolve.
+    await writeFile(
+      settingsPath,
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            {
+              matcher: '',
+              hooks: [
+                {
+                  type: 'command',
+                  command: `${process.execPath} hook user-prompt-submit`,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      'utf8',
+    );
+
+    const report = await runDoctor(repo, { hookSettingsPaths: [settingsPath] });
+    expect(report.checks.filter((c) => c.code === 'hook-stale')).toHaveLength(0);
+    await rm(settingsDir, { recursive: true, force: true });
+  });
+
+  it('hook-stale ignores settings without a carn hook entry', async () => {
+    const settingsDir = await mkdtemp(join(tmpdir(), 'carn-hooknone-'));
+    const settingsPath = join(settingsDir, 'settings.json');
+    await writeFile(
+      settingsPath,
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            { matcher: '', hooks: [{ type: 'command', command: 'unrelated' }] },
+          ],
+        },
+      }),
+      'utf8',
+    );
+    const report = await runDoctor(repo, { hookSettingsPaths: [settingsPath] });
+    expect(report.checks.filter((c) => c.code === 'hook-stale')).toHaveLength(0);
+    await rm(settingsDir, { recursive: true, force: true });
+  });
+
+  it('index-rebuild-push-failed surfaces when the push to origin is rejected', async () => {
+    // Set up: real entries + dropped index, then break origin's push path.
+    await addEntry(repo, {
+      type: 'coordinate',
+      description: 'one',
+      paths: ['*'],
+      reason: 'r',
+    } as unknown as Parameters<typeof addEntry>[1], {
+      identity: { name: 'a', email: 'a@x.test' },
+    });
+    await removeIndexFile(repo);
+
+    // Replace origin with a path that doesn't exist so any push fails fast.
+    // The local fix should still happen; only the push-failed check should fire.
+    await execFileAsync(
+      'git',
+      ['remote', 'set-url', 'origin', join(sbx.root, 'does-not-exist.git')],
+      { cwd: repo },
+    );
+
+    const report = await runDoctor(repo, { fix: true });
+    const idxFixed = report.checks.filter((c) => c.code === 'index-mismatch');
+    expect(idxFixed).toHaveLength(1);
+    // `fixed` must NOT be true when the push failed — the user shouldn't be
+    // told "index rebuilt" while origin still diverges.
+    expect(idxFixed[0]!.fixed).toBeUndefined();
+
+    const pushFailed = report.checks.filter((c) => c.code === 'index-rebuild-push-failed');
+    expect(pushFailed).toHaveLength(1);
+    expect(pushFailed[0]!.severity).toBe('error');
+    expect(report.exit_tier).toBe('error');
+  });
+
   it('exit_tier escalates from warn to error when an error is present', async () => {
     await addEntry(repo, {
       type: 'forbid-pattern',

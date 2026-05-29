@@ -1,6 +1,9 @@
+import { execFile } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 import { ensureBranch } from './storage/branch.js';
 import {
@@ -15,8 +18,11 @@ import {
   type GitIdentity,
 } from './storage/worktree.js';
 import { appendIndexRecord, readIndexLog, INDEX_LOG_PATH } from './storage/index-log.js';
+import { CARN_HOOK_MARKER } from './hooks/install.js';
 import { EntrySchema, type Entry } from './types.js';
 import { isExpired } from './ttl.js';
+
+const execFileAsync = promisify(execFile);
 
 export type Severity = 'info' | 'warn' | 'error';
 
@@ -60,6 +66,14 @@ export interface DoctorOptions {
   identity?: GitIdentity;
   /** Override clock for deterministic tests. */
   now?: () => Date;
+  /**
+   * Override the project/user Claude Code settings paths probed by the
+   * hook-stale check. Tests use this to point at fixture files without
+   * touching `~/.claude/settings.json`. Defaults to:
+   *   - `<repoRoot>/.claude/settings.json`
+   *   - `<homedir()>/.claude/settings.json`
+   */
+  hookSettingsPaths?: readonly string[];
 }
 
 const DEFAULT_STALE_DAYS = 30;
@@ -119,6 +133,7 @@ export async function runDoctor(
 
   await checkOrphanedWorktrees(repoRoot, checks, fix);
   await checkBranchDrift(repoRoot, checks, fix);
+  await checkHookStale(repoRoot, checks, opts.hookSettingsPaths);
 
   // Acquire a fresh worktree *after* the drift fix so the disk inspection
   // sees the post-fetch tip rather than a stale snapshot.
@@ -481,14 +496,29 @@ async function checkIndexMismatch(
         const head = (await gitExec(worktreePath, ['rev-parse', 'HEAD'])).stdout.trim();
         if (head) {
           await gitExec(repoRoot, ['update-ref', CARN_REF, head], { allowFailure: true });
+          // The push must succeed for the fix to be considered complete.
+          // Swallowing a non-fast-forward / auth / network failure here and
+          // still flagging `fixed: true` would leave origin diverged — the
+          // next `carn add` from any sibling clone hits ConcurrentWriteError
+          // out of a state the user thought doctor had repaired.
+          let pushOk = true;
           if (await hasOrigin(repoRoot)) {
-            await gitExec(
+            const push = await gitExec(
               repoRoot,
               ['push', 'origin', `${head}:${CARN_REF}`],
               { allowFailure: true },
             );
+            pushOk = push.code === 0;
+            if (!pushOk) {
+              checks.push({
+                severity: 'error',
+                code: 'index-rebuild-push-failed',
+                message: `index rebuilt locally but push to origin failed: ${(push.stderr || push.stdout).trim()}`,
+                fixable: false,
+              });
+            }
           }
-          check.fixed = true;
+          if (pushOk) check.fixed = true;
         }
       }
     }
@@ -501,4 +531,157 @@ function formatZodIssues(err: z.ZodError): string {
   return err.issues
     .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
     .join('; ');
+}
+
+/**
+ * Extract the first whitespace-delimited token from a shell command,
+ * handling a leading double-quoted segment so paths with spaces survive.
+ * The carn hook's `defaultCommand()` quotes the CLI entry path via
+ * `JSON.stringify`, so the second token can be quoted; the first
+ * (`process.execPath`) is normally bare on macOS/Linux. We support both
+ * shapes defensively.
+ */
+function firstShellToken(command: string): string | null {
+  const trimmed = command.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.startsWith('"')) {
+    const end = trimmed.indexOf('"', 1);
+    return end === -1 ? null : trimmed.slice(1, end);
+  }
+  const space = trimmed.search(/\s/);
+  return space === -1 ? trimmed : trimmed.slice(0, space);
+}
+
+function secondShellToken(command: string): string | null {
+  const first = firstShellToken(command);
+  if (first === null) return null;
+  // Find where the first token ends and re-tokenize the remainder.
+  const trimmed = command.trim();
+  const firstEnd = trimmed.startsWith('"')
+    ? trimmed.indexOf('"', 1) + 1
+    : (() => {
+        const idx = trimmed.search(/\s/);
+        return idx === -1 ? trimmed.length : idx;
+      })();
+  return firstShellToken(trimmed.slice(firstEnd));
+}
+
+interface ClaudeHookEntry {
+  command?: string;
+}
+
+interface ClaudeHookMatcher {
+  hooks?: ClaudeHookEntry[];
+}
+
+interface ClaudeSettingsShape {
+  hooks?: {
+    UserPromptSubmit?: ClaudeHookMatcher[];
+  };
+}
+
+function findCarnHookCommand(settings: ClaudeSettingsShape): string | null {
+  const matchers = settings.hooks?.UserPromptSubmit ?? [];
+  for (const m of matchers) {
+    for (const h of m.hooks ?? []) {
+      if (typeof h.command === 'string' && h.command.includes(CARN_HOOK_MARKER)) {
+        return h.command;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve a bare executable name against the current PATH. Returns the
+ * absolute path when found, or `null` otherwise. Uses `command -v` via
+ * the user's shell semantics — the same lookup Claude Code itself uses
+ * to spawn the hook, so a `null` here is the same "command not found"
+ * the hook would hit at runtime.
+ */
+async function whichExecutable(name: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('/bin/sh', ['-c', `command -v ${JSON.stringify(name)}`]);
+    const resolved = stdout.trim();
+    return resolved.length > 0 ? resolved : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The carn hook command embedded in `.claude/settings.json` is captured
+ * once at install time — see `src/hooks/install.ts::defaultCommand`. It
+ * encodes the *then-current* `process.execPath` plus `process.argv[1]`,
+ * which become stale after `nvm use`, `npm update -g carn`, a node
+ * upgrade, or moving the carn checkout. The installer warns about this
+ * once at install ("re-run with --force if you move carn or switch node
+ * versions") but the user has no signal afterward — until the next
+ * prompt silently fails with `command not found`.
+ *
+ * Doctor periodically re-probes the embedded paths and emits a warn
+ * with the exact remediation: `carn install hooks --force`. Marked
+ * `fixable: false` deliberately — auto-rewriting another tool's
+ * settings.json without consent is a worse failure mode than letting
+ * the user run the documented one-liner.
+ */
+async function checkHookStale(
+  repoRoot: string,
+  checks: DoctorCheck[],
+  override: readonly string[] | undefined,
+): Promise<void> {
+  const paths =
+    override ?? [
+      join(repoRoot, '.claude', 'settings.json'),
+      join(homedir(), '.claude', 'settings.json'),
+    ];
+  const seen = new Set<string>();
+  for (const path of paths) {
+    if (seen.has(path) || !existsSync(path)) continue;
+    seen.add(path);
+    let raw: string;
+    try {
+      raw = await readFile(path, 'utf8');
+    } catch {
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // Malformed settings.json isn't our problem to diagnose — the
+      // hook would fail loudly on its own; doctor stays narrow.
+      continue;
+    }
+    if (!parsed || typeof parsed !== 'object') continue;
+    const command = findCarnHookCommand(parsed as ClaudeSettingsShape);
+    if (!command) continue;
+
+    const exe = firstShellToken(command);
+    if (!exe) continue;
+    const exeResolves = exe.startsWith('/') ? existsSync(exe) : (await whichExecutable(exe)) !== null;
+    if (!exeResolves) {
+      checks.push({
+        severity: 'warn',
+        code: 'hook-stale',
+        message: `${path}: hook command does not resolve (\`${exe}\` not found). Run \`carn install hooks${path.includes(homedir()) ? ' --user' : ''} --force\` to rewrite.`,
+        fixable: false,
+      });
+      continue;
+    }
+
+    // The second token is the CLI entry path (`process.argv[1]`) when
+    // defaultCommand() built the command. Bare-`carn` overrides have no
+    // second-token path — skip those (exeResolves above already covered
+    // them). Absolute-path entries get a separate file-existence probe.
+    const entry = secondShellToken(command);
+    if (entry && entry.startsWith('/') && !existsSync(entry)) {
+      checks.push({
+        severity: 'warn',
+        code: 'hook-stale',
+        message: `${path}: hook entry path missing (\`${entry}\`). Run \`carn install hooks${path.includes(homedir()) ? ' --user' : ''} --force\` to rewrite.`,
+        fixable: false,
+      });
+    }
+  }
 }
