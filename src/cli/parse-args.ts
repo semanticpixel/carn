@@ -6,8 +6,16 @@
  *   --no-flag        → boolean false (only when caller marks `flag` as boolean)
  *   positionals     → everything that isn't a flag
  *
- * A flag declared as `array` collects every occurrence into a string[]
- * (so `--paths a --paths b` and `--paths=a --paths=b` both yield `[a, b]`).
+ * A flag declared as `array` is **greedy on the next-slot form**: it consumes
+ * its first value plus every subsequent non-flag token up to the next `--flag`
+ * or the `--` positional terminator. So all of these yield `paths = [a, b, c]`:
+ *   --paths a b c
+ *   --paths a --paths b --paths c
+ *   --paths=a --paths=b --paths=c
+ *
+ * The `--flag=value` form stays bounded to a single value — that's the
+ * established CLI convention for explicit value-boundary (kubectl, cargo, git).
+ * Users who want explicit boundedness without `=` can repeat the flag.
  *
  * No-frills by design — the spec rules out commander/yargs. The trade-off is
  * documented: unknown flags surface as an error so a typo doesn't silently
@@ -105,8 +113,10 @@ export function parseArgs(argv: readonly string[], spec: ParseSpec): ParsedArgs 
     }
 
     let value: string;
+    let valueFromInline: boolean;
     if (inlineValue !== null) {
       value = inlineValue;
+      valueFromInline = true;
     } else {
       const next = argv[i + 1];
       if (next === undefined || (next.startsWith('-') && next !== '-')) {
@@ -114,12 +124,26 @@ export function parseArgs(argv: readonly string[], spec: ParseSpec): ParsedArgs 
       }
       value = next;
       i++;
+      valueFromInline = false;
     }
 
     if (flag.kind === 'array') {
       const existing = flags[canonical];
-      if (Array.isArray(existing)) existing.push(value);
-      else flags[canonical] = [value];
+      const arr = Array.isArray(existing) ? existing : [];
+      arr.push(value);
+      flags[canonical] = arr;
+      // Greedy consumption — only when the first value came from the next
+      // argv slot, not from `--flag=value` (the `=` form is bounded by
+      // CLI convention). Stops at the next flag token or `--`.
+      if (!valueFromInline) {
+        while (i + 1 < argv.length) {
+          const peek = argv[i + 1]!;
+          if (peek === '--') break;
+          if (peek.startsWith('-') && peek !== '-') break;
+          arr.push(peek);
+          i++;
+        }
+      }
     } else {
       flags[canonical] = value;
     }
