@@ -7,6 +7,7 @@ export const COMMANDS = [
   'show',
   'close',
   'query',
+  'mcp',
   'help',
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
@@ -27,6 +28,7 @@ ${p.bold('Commands:')}
   ${p.cyan('show')}      Show one entry by id (prefix-matched)
   ${p.cyan('close')}     Close an entry
   ${p.cyan('query')}     Find entries whose paths overlap one or more queries (agent read API)
+  ${p.cyan('mcp')}       Start the MCP server over stdio (for Claude Code / other MCP clients)
   ${p.cyan('help')}      Show this message, or help for a single command
 
 ${p.bold('Flags:')}
