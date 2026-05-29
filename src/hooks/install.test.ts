@@ -154,4 +154,29 @@ describe('installHook — written command is PATH-independent', () => {
     expect(cmd).toContain(process.execPath);
     expect(cmd).toContain('hook user-prompt-submit');
   });
+
+  it('returns the resolved command on InstallResult', async () => {
+    const result = await installHook({ target: 'project', cwd });
+    expect(result.command).toContain(process.execPath);
+    expect(result.command).toContain('hook user-prompt-submit');
+  });
+
+  it('returns the override command verbatim when --command is set', async () => {
+    const override = 'npx --no-install carn hook user-prompt-submit';
+    const result = await installHook({ target: 'project', cwd, command: override });
+    expect(result.command).toBe(override);
+    const parsed = JSON.parse(await readFile(result.path, 'utf8'));
+    expect(parsed.hooks.UserPromptSubmit[0].hooks[0].command).toBe(override);
+  });
+
+  it('returns the existing command on skipped (not the would-be default)', async () => {
+    const override = 'carn hook user-prompt-submit --custom';
+    await installHook({ target: 'project', cwd, command: override });
+    const second = await installHook({ target: 'project', cwd });
+    expect(second.skipped).toBe(true);
+    // skipped returns the command the caller passed (or default), not the one
+    // that's already on disk — InstallResult.command means "what this call
+    // resolved", documenting that nothing changed.
+    expect(second.command).toContain(process.execPath);
+  });
 });

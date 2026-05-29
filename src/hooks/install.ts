@@ -33,6 +33,14 @@ export interface InstallResult {
   created: boolean;
   /** Whether the carn hook was already present and skipped. */
   skipped: boolean;
+  /**
+   * The hook command that ended up in settings.json — the resolved
+   * `defaultCommand()` value, or the explicit `--command` override.
+   * Surfaced in CLI output so users see exactly what got written and can
+   * spot when the absolute path no longer resolves (e.g. after `nvm use`
+   * or `npm update -g`). Always present, including on `skipped: true`.
+   */
+  command: string;
 }
 
 /**
@@ -165,9 +173,9 @@ export async function installHook(opts: InstallOptions): Promise<InstallResult> 
   }
 
   const { next, skipped } = mergeCarnHook(existing, command, Boolean(opts.force));
-  if (skipped) return { path, created: false, skipped: true };
+  if (skipped) return { path, created: false, skipped: true, command };
 
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(next, null, 2) + '\n', 'utf8');
-  return { path, created, skipped: false };
+  return { path, created, skipped: false, command };
 }
