@@ -83,12 +83,15 @@ main          ── feature work, your code
 carn          ── isolated branch, just .carn/ entries (managed by the CLI)
 ```
 
-Each entry is its own file (`.carn/in-flight/<uuid>.json`) so concurrent
-writes from two agents don't conflict. Closed entries archive to
-`.carn/closed/`. An append-only `.carn/index.jsonl` gives fast scans.
+Each entry is its own file (`.carn/in-flight/<id>.json`, where `<id>` is
+an 8-character nanoid) so concurrent writes from two agents don't conflict.
+Closed entries archive to `.carn/closed/`. An append-only
+`.carn/index.jsonl` gives fast scans.
 
-CI ignores the `carn` branch by convention. Force-push is blocked by the
-CLI. Full git history of every entry is preserved.
+CI ignores the `carn` branch by convention. The CLI itself never
+force-pushes — its push path uses fetch-and-rebase-then-push. Protect the
+`carn` branch via your platform's branch protection if you want to enforce
+that across all writers. Full git history of every entry is preserved.
 
 ## Install
 
