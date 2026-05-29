@@ -12,8 +12,23 @@ const VERSION = '0.1.0';
  * any JSON-RPC traffic begins.
  */
 export async function startMcpServer(): Promise<void> {
-  const repoRoot = await resolveRepoRoot();
-  const identity = await resolveIdentity(repoRoot);
+  let repoRoot: string;
+  let identity: Awaited<ReturnType<typeof resolveIdentity>>;
+  try {
+    repoRoot = await resolveRepoRoot();
+    identity = await resolveIdentity(repoRoot);
+  } catch (err) {
+    // Resolution happens before transport connect, so without this guard
+    // Claude Code (and other MCP clients) see an opaque "MCP server failed
+    // to start" with no context. Writing the cause + the prereq to stderr
+    // surfaces it in the client's MCP log. The `throw` preserves the
+    // non-zero exit and the existing error type for callers.
+    process.stderr.write(
+      `carn mcp: startup failed — ${err instanceof Error ? err.message : String(err)}\n` +
+        `carn mcp expects a git repo at the working directory with user.email configured.\n`,
+    );
+    throw err;
+  }
 
   const server = new McpServer({
     name: 'carn',
