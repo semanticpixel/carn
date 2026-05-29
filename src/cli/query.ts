@@ -1,6 +1,5 @@
-import { listEntries } from '../storage/entry.js';
-import { filterByPaths } from '../path-match.js';
-import { isExpired } from '../ttl.js';
+import { queryEntries } from '../lib/index.js';
+import type { EntryType } from '../types.js';
 import { CliError, resolveRepoRoot } from './context.js';
 import { TABLE_HEADER, formatEntryRow, formatJson, painter, renderTable } from './format.js';
 import { parseArgs } from './parse-args.js';
@@ -41,16 +40,12 @@ export async function runQuery(argv: readonly string[]): Promise<number> {
   }
 
   const repoRoot = await resolveRepoRoot();
-  let entries = await listEntries(repoRoot, { status: 'in-flight' });
-  entries = filterByPaths(entries, paths);
-
   const typeFlag = parsed.flags['--type'];
-  if (typeof typeFlag === 'string') {
-    entries = entries.filter((e) => e.type === typeFlag);
-  }
-  if (parsed.flags['--exclude-expired']) {
-    entries = entries.filter((e) => !isExpired(e));
-  }
+  const entries = await queryEntries(repoRoot, {
+    paths,
+    type: typeof typeFlag === 'string' ? (typeFlag as EntryType) : undefined,
+    excludeExpired: Boolean(parsed.flags['--exclude-expired']),
+  });
 
   if (parsed.flags['--json']) {
     process.stdout.write(formatJson({ entries }));

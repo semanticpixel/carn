@@ -1,9 +1,8 @@
-import { closeEntry } from '../storage/entry.js';
+import { closeEntryById } from '../lib/index.js';
 import { autoCloseMergedEntries } from '../auto-close.js';
 import { CliError, resolveIdentity, resolveRepoRoot } from './context.js';
 import { formatJson, painter } from './format.js';
 import { parseArgs } from './parse-args.js';
-import { resolveEntry } from './show.js';
 
 export const CLOSE_HELP = `
 carn close — close a carn entry
@@ -47,15 +46,10 @@ export async function runClose(argv: readonly string[]): Promise<number> {
 
   const repoRoot = await resolveRepoRoot();
   const identity = await resolveIdentity(repoRoot);
-  const target = await resolveEntry(repoRoot, idArg);
-
   const mergedSha = parsed.flags['--merged-sha'];
-  const closed = await closeEntry(repoRoot, target.id, {
+  const closed = await closeEntryById(repoRoot, idArg, {
     identity,
-    metadataPatch:
-      typeof mergedSha === 'string' && mergedSha.length > 0
-        ? { merged_sha: mergedSha }
-        : undefined,
+    mergedSha: typeof mergedSha === 'string' ? mergedSha : undefined,
   });
 
   if (parsed.flags['--json']) {

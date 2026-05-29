@@ -1,4 +1,4 @@
-import { getEntry, listEntries } from '../storage/entry.js';
+import { EntryRefError, resolveEntry as resolveEntryFromLib } from '../lib/index.js';
 import type { Entry } from '../types.js';
 import { CliError, resolveRepoRoot } from './context.js';
 import { formatJson, painter } from './format.js';
@@ -41,24 +41,18 @@ export async function runShow(argv: readonly string[]): Promise<number> {
 }
 
 export async function resolveEntry(repoRoot: string, idOrPrefix: string): Promise<Entry> {
-  // Fast path: full-length valid id — single read. Saves a full directory
-  // walk on the common case where an agent has the exact id from `add`.
-  if (idOrPrefix.length === 8) {
-    const exact = await getEntry(repoRoot, idOrPrefix);
-    if (exact) return exact;
+  // CLI wrapper around lib's resolveEntry — maps EntryRefError to CliError
+  // so the user gets the same "no entry with id ..." UX as before.
+  try {
+    return await resolveEntryFromLib(repoRoot, idOrPrefix);
+  } catch (err) {
+    if (err instanceof EntryRefError) {
+      if (err.kind === 'not-found') throw new CliError(err.message);
+      const sample = err.matches.slice(0, 5).map((id) => `  - ${id}`).join('\n');
+      throw new CliError(`${err.message}\n${sample}`);
+    }
+    throw err;
   }
-  const all = await listEntries(repoRoot, { status: 'all' });
-  const matches = all.filter((e) => e.id.startsWith(idOrPrefix));
-  if (matches.length === 0) {
-    throw new CliError(`no entry with id '${idOrPrefix}'.`);
-  }
-  if (matches.length > 1) {
-    const sample = matches.slice(0, 5).map((e) => `  - ${e.id}`).join('\n');
-    throw new CliError(
-      `ambiguous id prefix '${idOrPrefix}' (${matches.length} matches):\n${sample}`,
-    );
-  }
-  return matches[0]!;
 }
 
 function renderEntry(entry: Entry): void {
