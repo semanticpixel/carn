@@ -30,10 +30,13 @@ const KNOWN_FILE_EXTENSIONS = new Set([
   'json', 'jsonc', 'json5', 'yaml', 'yml', 'toml',
   'md', 'mdx', 'txt', 'rst',
   'html', 'css', 'scss', 'sass', 'less',
+  'astro', 'vue', 'svelte',
   'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift',
   'c', 'cc', 'cpp', 'h', 'hpp',
   'sh', 'bash', 'zsh', 'fish',
   'sql', 'graphql', 'gql', 'proto',
+  'tf', 'tfvars', 'hcl',
+  'dockerfile',
   'lock', 'env', 'gitignore', 'gitattributes',
   'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico',
 ]);

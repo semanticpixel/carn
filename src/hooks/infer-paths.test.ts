@@ -46,4 +46,16 @@ describe('extractPathsFromPrompt', () => {
       'src/foo.ts',
     ]);
   });
+
+  it('keeps bare filenames with modern web-stack extensions', () => {
+    expect(extractPathsFromPrompt('please fix index.astro')).toEqual(['index.astro']);
+    expect(extractPathsFromPrompt('check App.vue and main.svelte')).toEqual([
+      'App.vue',
+      'main.svelte',
+    ]);
+    expect(extractPathsFromPrompt('update main.tf and vars.tfvars')).toEqual([
+      'main.tf',
+      'vars.tfvars',
+    ]);
+  });
 });
