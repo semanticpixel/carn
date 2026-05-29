@@ -31,13 +31,14 @@ When their prompt mentions any of the listed paths:
 
 ```text
 <system-reminder>
-carn entries for paths the prompt references:
+1 active carn entry applies to this context:
 
-  pq2r8stv  coordinate  Migrating session storage from cookies to Redis
-            Author: luis@auth-team.example  TTL: 4d remaining
-            Paths: src/auth/**, src/api/login.ts, src/api/logout.ts
-            Reason: Active refactor; please leave a PR comment before
-                    parallel edits — luis@auth-team
+- `pq2r8stv` (coordinate) [ttl: 4d] Migrating session storage from cookies to Redis
+  reason: Active refactor; please leave a PR comment before parallel edits — luis@auth-team
+  paths: src/auth/**, src/api/login.ts, src/api/logout.ts
+  author: luis@auth-team.example
+
+Dismiss any of these with `carn close <id>` once the constraint/coordinate is no longer relevant.
 </system-reminder>
 ```
 

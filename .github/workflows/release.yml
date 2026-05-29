@@ -1,9 +1,12 @@
 name: Release
 
-# Publishes to npm on a `v*.*.*` tag push. Tagging happens locally
-# (`pnpm version <bump>` creates the tag) and the developer pushes it
-# with `git push --tags` — never publish from a workstation, the token
-# only lives here.
+# Publishes to npm on a `v*.*.*` tag push. Uses npm's OIDC trusted-
+# publisher flow — no NPM_TOKEN secret to rotate or leak; provenance
+# attestation is automatic. Tagging happens locally
+# (`pnpm version <bump>` creates the tag); the developer pushes it
+# with `git push --tags`. The package must be pre-registered as a
+# trusted publisher on npm (see CHANGELOG / PR description for the
+# one-time setup).
 on:
   push:
     tags:
@@ -34,6 +37,7 @@ jobs:
 
       - run: pnpm build
 
-      - run: pnpm publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # --provenance signs the publish with the GitHub OIDC token, which
+      # npm validates against the trusted-publisher record on the package.
+      # No NODE_AUTH_TOKEN env needed — the OIDC token is the auth.
+      - run: pnpm publish --access public --provenance --no-git-checks

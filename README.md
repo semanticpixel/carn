@@ -40,7 +40,7 @@ $ carn add "Removing typecasts; tightening ESLint" \
     --paths "src/**/*.ts" \
     --ttl 7d
 
-Created abc123 on branch `carn`.
+✓ added na6ppiup forbid-pattern
 ```
 
 Your teammate's agent at session start runs:
@@ -48,8 +48,8 @@ Your teammate's agent at session start runs:
 ```bash
 $ carn query --paths src/services/auth.ts
 
-abc123  forbid-pattern  Don't introduce new `as Foo` casts...
-        Author: luis  TTL: 6d remaining  Paths: src/**/*.ts
+ID        TYPE            DESCRIPTION                            TTL  AUTHOR             AGE
+na6ppiup  forbid-pattern  Removing typecasts; tightening ESLint  6d   luis@team.example  1s
 ```
 
 …and surfaces the constraint to your teammate before their agent writes a

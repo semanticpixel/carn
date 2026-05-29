@@ -24,6 +24,10 @@ Initial release.
 - **CLI.** Six commands wired to the storage + schema + path-match
   layers: `init`, `add`, `list`, `show`, `close`, `query`. Stable
   `--json` output. `NO_COLOR` respected.
+- **CLI: greedy array flags.** `--paths a b c` now consumes all three
+  values (was: only `a`, with `b c` falling into positionals). Repeated
+  `--paths a --paths b` continues to work; `--paths=a` stays bounded by
+  convention. Surfaced by the dogfooding loop itself.
 - **TTL + auto-close.** `--ttl 7d` style durations; `carn close
   --auto-merged` closes in-flight entries whose `metadata.merged_sha`
   is now an ancestor of the default branch.

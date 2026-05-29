@@ -30,13 +30,15 @@ not just rename.
 
 ```text
 <system-reminder>
-carn entries for paths the prompt references:
+1 active carn entry applies to this context:
 
-  k4mn7pr8  prefer-pattern  Use userRepo.findById instead of getUser —
-            caches + metrics
-            Author: luis@team.example  TTL: 59d remaining
-            Paths: src/**/*.ts
-            Instead of: getUser(id)
+- `k4mn7pr8` (prefer-pattern) [ttl: 59d] Use userRepo.findById instead of getUser — caches + metrics
+  constraint: userRepo.findById(id) handles cache + tenant scoping + metrics
+  instead of: getUser(id)
+  paths: src/**/*.ts
+  author: luis@team.example
+
+Dismiss any of these with `carn close <id>` once the constraint/coordinate is no longer relevant.
 </system-reminder>
 ```
 
@@ -59,7 +61,9 @@ two months to drift toward the new API. After that, either:
 
 ```bash
 $ carn doctor
-warn  ttl-expired  [fixable]  k4mn7pr8 (prefer-pattern): ttl 60d expired
+warn   ttl-expired  k4mn7pr8 (prefer-pattern): ttl 60d expired
+
+1 warning
 ```
 
 …and the call is yours.

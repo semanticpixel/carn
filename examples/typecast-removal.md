@@ -18,12 +18,12 @@ $ carn add "Removing typecasts; tightening ESLint" \
     --paths "src/**/*.ts" \
     --ttl 7d
 
-✓ added abc12def forbid-pattern
+✓ added na6ppiup forbid-pattern
 ```
 
-The entry lives on the orphan `carn` branch — pushed to origin as soon
-as you `carn push` (or auto-pushed by `add`). Anyone cloning the repo
-sees it.
+The entry lives on the orphan `carn` branch — auto-pushed to origin by
+`carn add`. (No remote? You see a one-time warning; entries stay local
+until you add one.)
 
 ## What the agent sees
 
@@ -32,12 +32,14 @@ they ran `carn install hooks` once):
 
 ```text
 <system-reminder>
-carn entries for paths the prompt references:
+1 active carn entry applies to this context:
 
-  abc12def  forbid-pattern  Don't introduce new `as Foo` casts; use
-            satisfies or explicit types
-            Author: luis@team.example  TTL: 6d remaining
-            Paths: src/**/*.ts
+- `na6ppiup` (forbid-pattern) [ttl: 6d] Removing typecasts; tightening ESLint
+  constraint: Don't introduce new `as Foo` casts; use satisfies or explicit types
+  paths: src/**/*.ts
+  author: luis@team.example
+
+Dismiss any of these with `carn close <id>` once the constraint/coordinate is no longer relevant.
 </system-reminder>
 ```
 
@@ -48,15 +50,15 @@ The agent now knows the constraint *before* writing code.
 After your PR lands on `main` with merge SHA `1a2b3c4`:
 
 ```bash
-$ carn close abc12def --merged-sha 1a2b3c4
-✓ closed abc12def
+$ carn close na6ppiup --merged-sha 1a2b3c4
+✓ closed na6ppiup
 ```
 
 Or, equivalently, on a schedule:
 
 ```bash
 $ carn close --auto-merged
-✓ closed abc12def (merged_sha 1a2b3c4 is now ancestor of origin/main)
+✓ closed na6ppiup (merged_sha 1a2b3c4 is now ancestor of origin/main)
 ```
 
 `closed/` entries stay in the branch's history forever — searchable, not
