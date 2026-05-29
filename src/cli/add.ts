@@ -1,4 +1,4 @@
-import { addEntry } from '../storage/entry.js';
+import { registerEntry } from '../lib/index.js';
 import type { EntryDraft } from '../types.js';
 import { TtlParseError, assertValidTtl } from '../ttl.js';
 import { CliError, resolveIdentity, resolveRepoRoot } from './context.js';
@@ -101,7 +101,7 @@ export async function runAdd(argv: readonly string[]): Promise<number> {
   const draft = buildDraft(type, description, paths, ttl as string | undefined, parsed.flags);
   const repoRoot = await resolveRepoRoot();
   const identity = await resolveIdentity(repoRoot);
-  const entry = await addEntry(repoRoot, draft, { identity });
+  const entry = await registerEntry(repoRoot, draft, { identity });
 
   if (parsed.flags['--json']) {
     process.stdout.write(formatJson({ entry }));

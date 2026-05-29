@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { z } from 'zod';
 import { CliError } from './cli/context.js';
+import { EntryRefError } from './lib/index.js';
 import { runAdd, ADD_HELP } from './cli/add.js';
 import { runClose, CLOSE_HELP } from './cli/close.js';
 import { runInit, INIT_HELP } from './cli/init.js';
 import { runList, LIST_HELP } from './cli/list.js';
+import { runMcp, MCP_HELP } from './cli/mcp.js';
 import { runQuery, QUERY_HELP } from './cli/query.js';
 import { runShow, SHOW_HELP } from './cli/show.js';
 import { ArgParseError } from './cli/parse-args.js';
@@ -26,6 +28,7 @@ const HANDLERS: Record<Exclude<CommandName, 'help'>, Handler> = {
   show: runShow,
   close: runClose,
   query: runQuery,
+  mcp: runMcp,
 };
 
 const PER_COMMAND_HELP: Record<Exclude<CommandName, 'help'>, string> = {
@@ -35,6 +38,7 @@ const PER_COMMAND_HELP: Record<Exclude<CommandName, 'help'>, string> = {
   show: SHOW_HELP,
   close: CLOSE_HELP,
   query: QUERY_HELP,
+  mcp: MCP_HELP,
 };
 
 function isKnownHandler(s: string): s is Exclude<CommandName, 'help'> {
@@ -100,6 +104,13 @@ export async function runCarn(argv: readonly string[]): Promise<number> {
     }
     if (err instanceof ArgParseError) {
       process.stderr.write(`${p.red('error:')} ${err.message}\n`);
+      return 1;
+    }
+    if (err instanceof EntryRefError) {
+      const detail = err.matches.length > 0
+        ? `\n${err.matches.slice(0, 5).map((id) => `  - ${id}`).join('\n')}`
+        : '';
+      process.stderr.write(`${p.red('error:')} ${err.message}${detail}\n`);
       return 1;
     }
     if (err instanceof z.ZodError) {
