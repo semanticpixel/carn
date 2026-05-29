@@ -81,13 +81,6 @@ export async function makeBareRepo(): Promise<Sandbox> {
   };
 }
 
-export async function gitStatusSnapshot(cwd: string): Promise<string> {
-  const head = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd });
-  const status = await execFileAsync('git', ['status', '--porcelain=v1'], { cwd });
-  const branch = await execFileAsync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd });
-  return [
-    `head:${head.stdout.trim()}`,
-    `branch:${branch.stdout.trim()}`,
-    `status:${status.stdout}`,
-  ].join('\n');
-}
+// Re-exported from the canonical home so storage-test imports keep working.
+// New tests should import from `src/test-utils/git-snapshot.js` directly.
+export { gitStatusSnapshot } from '../test-utils/git-snapshot.js';
