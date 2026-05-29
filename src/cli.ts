@@ -4,6 +4,7 @@ import { CliError } from './cli/context.js';
 import { EntryRefError } from './lib/index.js';
 import { runAdd, ADD_HELP } from './cli/add.js';
 import { runClose, CLOSE_HELP } from './cli/close.js';
+import { runDoctorCli, DOCTOR_HELP } from './cli/doctor.js';
 import { runHook, HOOK_HELP } from './cli/hook.js';
 import { runInit, INIT_HELP } from './cli/init.js';
 import { runInstall, INSTALL_HELP } from './cli/install.js';
@@ -33,6 +34,7 @@ const HANDLERS: Record<Exclude<CommandName, 'help'>, Handler> = {
   mcp: runMcp,
   install: runInstall,
   hook: runHook,
+  doctor: runDoctorCli,
 };
 
 const PER_COMMAND_HELP: Record<Exclude<CommandName, 'help'>, string> = {
@@ -45,6 +47,7 @@ const PER_COMMAND_HELP: Record<Exclude<CommandName, 'help'>, string> = {
   mcp: MCP_HELP,
   install: INSTALL_HELP,
   hook: HOOK_HELP,
+  doctor: DOCTOR_HELP,
 };
 
 function isKnownHandler(s: string): s is Exclude<CommandName, 'help'> {
